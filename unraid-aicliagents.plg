@@ -1,16 +1,17 @@
 <?xml version='1.0' standalone='yes'?>
 
-<PLUGIN name="unraid-aicliagents" author="John White" version="2026.03.09.04" launch="Settings/AICliAgentsManager" pluginURL="https://github.com/johnpwhite/unraid-plg-aicliagents/raw/main/unraid-aicliagents.plg" min="7.2.0" icon="unraid-aicliagents.png">
+<PLUGIN name="unraid-aicliagents" author="John White" version="2026.03.09.17" launch="Settings/AICliAgentsManager" pluginURL="https://github.com/johnpwhite/unraid-plg-aicliagents/raw/main/unraid-aicliagents.plg" min="7.2.0" icon="unraid-aicliagents.png">
 
 <CHANGES>
-## 2026.03.09.04
-- Feat: Expanded Agent Store with support for Claude Code, OpenCode, Kilo Code, Pi Coder, and Codex CLI.
-- Feat: Integrated Node.js Environment (v22.22.0) with npm for seamless agent installation and management.
-- Feat: Implemented Offline-Ready Boot Resiliency using persistent USB source caching. Plugin UI is now available instantly on reboot even without a network.
-- Improve: Hardware Optimization - Moved all installer and runtime logs to RAM (/tmp) to prevent USB flash drive wear.
-- Improve: Robust Installer - Complete refactor with strict permission enforcement (fixes 'opencode' access), CRLF normalization, and aggressive legacy cleanup.
-- Fix: Resolved 'Invalid .page format' and XML parsing errors by standardizing headers and escaping entities.
-- Fix: Enhanced uninstaller to safely preserve user settings and agent home directories during upgrades.
+## 2026.03.09.17 - The "Premium UX" Update 💎
+- **Feat: Expanded Agent Store**: Added support for Claude Code, OpenCode, Kilo Code, Pi Coder, and Codex CLI.
+- **Feat: Integrated Node.js Environment**: Bundled Node.js (v22.22.0) with npm for seamless, portable agent management.
+- **Feat: Premium Uninstaller UI**: Completely redesigned uninstallation with quiet logging and a resilient, high-contrast summary box confirming preservation of settings and chats.
+- **Feat: Premium Installer UX**: Polished installation flow with professional status updates and a new "INSTALL COMPLETE" visual summary.
+- **Improve: System Branding**: Unified all system notifications and UI elements under the "AI CLI Agents Plugin" title.
+- **Improve: Boot Resiliency**: Implemented persistent USB source caching for instant UI availability on reboot.
+- **Improve: Hardware Optimization**: Moved all runtime logs to RAM (/tmp) to minimize USB flash drive wear.
+- **Fix: Robust Stability**: Resolved XML parsing errors, 'Invalid .page format' issues, and critical permission bugs for nested binaries.
 
 ## 2026.03.06.03
 - Repository Migration: Migrated from Gemini CLI to AI CLI Agents.
@@ -28,30 +29,28 @@
 <INLINE>
 #!/bin/bash
 NAME="unraid-aicliagents"
-VERSION="2026.03.09.04"
+VERSION="2026.03.09.17"
 GIT_URL="https://github.com/johnpwhite/unraid-plg-aicliagents/raw/main"
 EMHTTP_DEST="/usr/local/emhttp/plugins/$NAME"
 CONFIG_DIR="/boot/config/plugins/$NAME"
 
 # Set up clean UI output on FD 3
-exec 3>&amp;1
-# Redirect detailed trace to /tmp (RAM-based to avoid USB wear)
+exec 3&gt;&amp;1
+# Redirect detailed trace to /tmp (quiet, non-appending)
 LOG_FILE="/tmp/unraid-aicliagents/install.log"
 mkdir -p /tmp/unraid-aicliagents
-echo "--- Install Start: $(date) (v$VERSION) ---" > "$LOG_FILE"
-exec > "$LOG_FILE" 2>&amp;1
-set -x # TRACING ENABLED
+exec &gt; "$LOG_FILE" 2&gt;&amp;1
+set -x
 
-# Helper for clean UI status
+# Helper for clean UI status (bypasses log)
 status() {
-    echo "$1" >&amp;3
+    echo "$1" &gt;&amp;3
 }
 
 status "--- INSTALL START ---"
-mkdir -p "$CONFIG_DIR" # Keep this for CONFIG_DIR creation
+mkdir -p "$CONFIG_DIR"
 
-# Force aggressive cleanup of all existing AICli sessions to prevent upgrade conflicts
-status "Cleaning up all existing AICli processes and sessions..."
+status "Cleaning up active sessions..."
 # 1. Kill all ttyd processes managing aicli or gemini sockets
 pgrep -f "ttyd.*(aicliterm|geminiterm)-" | xargs kill -9 &gt; /dev/null 2&gt;&amp;1 || true
 
@@ -118,19 +117,17 @@ mkdir -p "$CONFIG_DIR"
 
 # 1. Download aicli.js to /boot (persistence)
 
-# 2. Download/Install Portable Node.js (v22.22.0) with npm
+# 2. Ensure Node.js runtime (v22.22.0)
 NODE_TAR="node-v22.22.0-linux-x64.tar.gz"
 NODE_URL="https://nodejs.org/dist/v22.22.0/node-v22.22.0-linux-x64.tar.gz"
 
 if [ ! -f "$CONFIG_DIR/$NODE_TAR" ]; then
-    status "Downloading full Node.js distribution (including npm)..."
+    status "Ensuring Node.js runtime..."
     wget -q -O "$CONFIG_DIR/$NODE_TAR" "$NODE_URL"
-else
-    status "Using cached Node.js package..."
 fi
 
 
-status "Installing Node.js and npm..."
+status "Installing Node.js..."
 TMP_EXTRACT="/tmp/node-extract-$$"
 mkdir -p "$TMP_EXTRACT"
 if ! tar -xf "$CONFIG_DIR/$NODE_TAR" -C "$TMP_EXTRACT" --no-same-owner; then
@@ -172,15 +169,13 @@ if [ ! -L /usr/local/bin/npx ]; then
     ln -sf "$EMHTTP_DEST/bin/npx" /usr/local/bin/npx
 fi
 
-# 3. Download/Install Portable tmux (v3.6a)
+# 3. Ensure portable tmux (v3.6a)
 TMUX_TAR="tmux-v3.6a.gz"
 TMUX_URL="https://github.com/mjakob-gh/build-static-tmux/releases/download/v3.6a/tmux.linux-amd64.gz"
 
 if [ ! -f "$CONFIG_DIR/$TMUX_TAR" ]; then
-    status "Downloading portable tmux (v3.6a)..."
+    status "Ensuring portable tmux..."
     wget -q -O "$CONFIG_DIR/$TMUX_TAR" "$TMUX_URL"
-else
-    status "Using cached tmux (v3.6a)..."
 fi
 
 status "Installing tmux..."
@@ -195,10 +190,8 @@ RG_URL="https://github.com/BurntSushi/ripgrep/releases/download/14.1.0/$RG_TAR"
 
 # 4a. Install fd
 if [ ! -f "$CONFIG_DIR/$FD_TAR" ]; then
-    status "Downloading portable fd (v10.3.0)..."
+    status "Ensuring portable fd..."
     wget -q -O "$CONFIG_DIR/$FD_TAR" "$FD_URL"
-else
-    status "Using cached fd (v10.3.0)..."
 fi
 
 status "Extracting fd..."
@@ -212,10 +205,8 @@ rm -rf "$TMP_EXTRACT_FD"
 
 # 4b. Install ripgrep
 if [ ! -f "$CONFIG_DIR/$RG_TAR" ]; then
-    status "Downloading portable ripgrep (14.1.0)..."
+    status "Ensuring portable ripgrep..."
     wget -q -O "$CONFIG_DIR/$RG_TAR" "$RG_URL"
-else
-    status "Using cached ripgrep (14.1.0)..."
 fi
 
 status "Extracting ripgrep..."
@@ -256,7 +247,7 @@ download_file() {
     local cache_file="$CACHE_SRC/$file_name"
     local dest_file="$EMHTTP_DEST/$dest"
 
-    echo "Installing $dest..."
+    # echo "Installing $dest..."
 
     # 1. Use Cache if it exists (Crucial for booting without network)
     if [ -f "$cache_file" ]; then
@@ -285,7 +276,7 @@ download_file() {
     return 0
 }
 
-status "Installing plugin UI and scripts..."
+status "Installing UI and scripts..."
 download_file "src/scripts/aicli-shell.sh" "scripts/aicli-shell.sh" || exit 1
 chmod +x "$EMHTTP_DEST/scripts/aicli-shell.sh"
 
@@ -320,18 +311,31 @@ if [ -d "$CACHE_DIR" ]; then
     shopt -u nullglob
 fi
 
-# Sync menu visibility after install
-php -r "require_once '/usr/local/emhttp/plugins/unraid-aicliagents/includes/AICliAgentsManager.php'; \$config = getAICliConfig(); updateAICliMenuVisibility(\$config['enable_tab']); saveAICliConfig(['version' =&gt; '2026.03.09.04']);"
+status "Initializing configuration..."
+php -r "require_once '/usr/local/emhttp/plugins/unraid-aicliagents/includes/AICliAgentsManager.php'; \$config = getAICliConfig(); updateAICliMenuVisibility(\$config['enable_tab']); saveAICliConfig(['version' =&gt; '2026.03.09.17']);"
 
-# Final Permission enforcement
 status "Setting permissions..."
 find "$EMHTTP_DEST" -type d -exec chmod 755 {} \;
 find "$EMHTTP_DEST" -type f -exec chmod 644 {} \;
 chmod -R 755 "$EMHTTP_DEST/scripts" 2&gt;/dev/null || true
 chmod -R 755 "$EMHTTP_DEST/bin" 2&gt;/dev/null || true
 
-status "--- INSTALL COMPLETE ---"
-echo "--- Install Complete: $(date) ---" &gt;&gt; "$LOG_FILE"
+status " "
+status "==========================================================="
+status "                INSTALL COMPLETE                           "
+status "==========================================================="
+status " "
+status "  [DONE] Node.js and dependencies installed"
+status "  [DONE] AI CLI Agents UI and scripts deployed"
+status "  [DONE] Cached agents restored to RAM"
+status " "
+status "  [NOTE] YOUR DATA IS SAFE:"
+status "  > Settings:   $CONFIG_DIR/*.cfg"
+status "  > Agent Home: $CONFIG_DIR/home/"
+status " "
+status "  [LOGS] Detailed install trace preserved at:"
+status "  > $LOG_FILE"
+status "==========================================================="
 </INLINE>
 </FILE>
 
@@ -340,10 +344,22 @@ echo "--- Install Complete: $(date) ---" &gt;&gt; "$LOG_FILE"
 <INLINE>
 #!/bin/bash
 NAME="unraid-aicliagents"
+CONFIG_DIR="/boot/config/plugins/$NAME"
 PLUGIN_DIR="/usr/local/emhttp/plugins/$NAME"
-echo "Removing $NAME..."
+# Set up logging to USB (persistent, quiet, non-appending)
+LOG="$CONFIG_DIR/uninstall.log"
+exec 3&gt;&amp;1
+exec &gt; "$LOG" 2&gt;&amp;1
+set -x
 
-# D-18: Kill all running processes before removing files
+# Helper for clean UI status updates (bypasses log redirection)
+status() {
+  echo "$1" &gt;&amp;3
+}
+
+status "--- UNINSTALL START ---"
+
+status "Terminating active processes..."
 # 1. Kill all ttyd processes managing aicli sockets
 pgrep -f "ttyd.*(aicliterm|geminiterm)-" | xargs kill -9 &gt; /dev/null 2&gt;&amp;1 || true
 # 2. Kill all AICli tmux sessions
@@ -353,7 +369,7 @@ fi
 # 3. Kill orphaned agent node processes
 pgrep -f "node.*(aicli|gemini).mjs" | xargs kill -9 &gt; /dev/null 2&gt;&amp;1 || true
 
-# 4. Clean up runtime state files
+status "Cleaning up runtime files..."
 rm -f /var/run/aicliterm-*.sock
 rm -f /var/run/unraid-aicliagents-*.pid
 rm -f /var/run/unraid-aicliagents-*.lock
@@ -364,14 +380,13 @@ rm -f /tmp/aicli-install-status
 rm -rf /tmp/unraid-aicliagents
 rm -f /tmp/ttyd-aicli-*.log
 
-# 5. Remove binaries and wrappers
+status "Removing plugin files..."
 rm -rf "$PLUGIN_DIR"
 
 # Clean up global symlinks ONLY if they point to our plugin
 cleanup_link() {
     local link=$1
     if [ -L "$link" ] &amp;&amp; readlink "$link" | grep -q "$NAME"; then
-        echo "  &gt; Removing symlink: $link"
         rm -f "$link"
     fi
 }
@@ -385,14 +400,41 @@ cleanup_link "/usr/local/bin/npx"
 
 removepkg "$NAME" &gt; /dev/null 2&gt;&amp;1
 
-# 7. Remove system files (keep config on boot drive per user request)
-echo "Cleaning up system files..."
-# rm -rf "/boot/config/plugins/$NAME"  # PRESERVED: User settings and home directory
-# rm -f "/boot/config/plugins/$NAME.plg"  # Natively handled by 'plugin remove'
+status "Pruning USB artifacts..."
+if [ -d "$CONFIG_DIR" ]; then
+    rm -f "$CONFIG_DIR/aicli.mjs"
+    rm -f "$CONFIG_DIR/debug.log"
+    rm -f "$CONFIG_DIR/versions.json"
+    rm -f "$CONFIG_DIR/tmux"
+    rm -f "$CONFIG_DIR"/*.tar.gz
+    rm -f "$CONFIG_DIR"/*.tar.xz
+    rm -f "$CONFIG_DIR"/*.gz
+    rm -rf "$CONFIG_DIR/pkg-cache"
+fi
 
-# Also clean up any legacy Gemini CLI remnants (except config to preserve settings)
+# Also clean up legacy Gemini remnants
 rm -f /boot/config/plugins/unraid-geminicli.plg
 rm -rf /usr/local/emhttp/plugins/unraid-geminicli
+
+status " "
+status " "
+status "==========================================================="
+status "                UNINSTALL COMPLETE                        "
+status "==========================================================="
+status " "
+status "  [DONE] Binaries and UI files removed"
+status "  [DONE] Runtime processes terminated"
+status " "
+status "  [NOTE] YOUR DATA HAS BEEN PRESERVED:"
+status "  > Settings:   $CONFIG_DIR/*.cfg"
+status "  > Agent Home: $CONFIG_DIR/home/"
+status " "
+status "  [LOGS] Detailed uninstall trace preserved at:"
+status "  > $LOG"
+status " "
+status "  [TIP] To fully remove all data, manually delete:"
+status "  > rm -rf $CONFIG_DIR"
+status "==========================================================="
 
 echo "Uninstall of $NAME complete."
 exit 0

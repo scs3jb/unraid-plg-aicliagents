@@ -49,7 +49,7 @@ function aicli_debug($msg) {
 }
 
 function aicli_notify($subject, $message, $type = 'normal') {
-    $command = "/usr/local/emhttp/webGui/scripts/notify -e \"AICliAgents\" -s " . escapeshellarg($subject) . " -d " . escapeshellarg($message) . " -i " . escapeshellarg($type);
+    $command = "/usr/local/emhttp/webGui/scripts/notify -e \"AI CLI Agents Plugin\" -s " . escapeshellarg($subject) . " -d " . escapeshellarg($message) . " -i " . escapeshellarg($type);
     shell_exec($command);
 }
 
