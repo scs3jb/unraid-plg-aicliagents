@@ -4,10 +4,19 @@
  */
 
 // One-time legacy Gemini CLI cleanup (handles registration and RAM assets)
-$legacyPlgFile = '/boot/config/plugins/unraid-geminicli.plg';
-if (file_exists($legacyPlgFile)) {
-    @unlink($legacyPlgFile);
-    @exec('rm -rf /usr/local/emhttp/plugins/unraid-geminicli');
+$legacyFiles = [
+    '/boot/config/plugins/unraid-geminicli.plg',
+    '/boot/config/plugins/geminicli.plg',
+    '/var/log/plugins/unraid-geminicli.plg',
+    '/var/log/plugins/geminicli.plg',
+    '/usr/local/emhttp/plugins/unraid-geminicli',
+    '/usr/local/emhttp/plugins/geminicli',
+    '/usr/local/bin/gemini'
+];
+foreach ($legacyFiles as $file) {
+    if (file_exists($file)) {
+        is_dir($file) ? @exec("rm -rf " . escapeshellarg($file)) : @unlink($file);
+    }
 }
 
 // Set up global error logging to debug file
