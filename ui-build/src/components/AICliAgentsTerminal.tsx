@@ -95,7 +95,7 @@ export const AICliAgentsTerminal: React.FC = () => {
         };
 
         fetchRegistry();
-        const regTimer = setInterval(fetchRegistry, 30000); // D-14: Reduced from 10s to 30s
+        const regTimer = setInterval(fetchRegistry, 60000); // D-14: Reduced from 30s to 60s to save processes
 
         const savedSessions = localStorage.getItem('aicliagents_sessions');
         let initial: Session[] = [];
@@ -179,7 +179,7 @@ export const AICliAgentsTerminal: React.FC = () => {
             });
         };
 
-        const timer = setInterval(poll, 10000); // D-14: Reduced from 4s to 10s
+        const timer = setInterval(poll, 20000); // D-14: Reduced from 10s to 20s to prevent process pileup
         poll();
         return () => clearInterval(timer);
     }, [sessions.map(s => s.id).join(',')]);
@@ -340,10 +340,29 @@ export const AICliAgentsTerminal: React.FC = () => {
 
     const resetSession = (e: React.MouseEvent, id: string) => {
         e.stopPropagation();
-        lastStartedKey.current = ''; // Clear lock to allow restart
-        setSessions(prev => prev.map(s => s.id === id ? { ...s, chatSessionId: '', lastActive: Date.now() } : s));
+        const session = sessions.find(s => s.id === id);
+        if (!session) return;
+
+        setIsStarting(true);
         const csrf = (window as any).csrf_token || '';
-        fetch(`/plugins/unraid-aicliagents/AICliAjax.php?action=restart&id=${id}&path=${encodeURIComponent(sessions.find(s => s.id === id)?.path || '')}&chatId=&csrf_token=${csrf}`);
+        const agentId = session.agentId || 'gemini-cli';
+
+        // Call restart on backend (stop + start), THEN refresh the iframe
+        fetch(`/plugins/unraid-aicliagents/AICliAjax.php?action=restart&id=${id}&agentId=${agentId}&path=${encodeURIComponent(session.path)}&chatId=&csrf_token=${csrf}`)
+            .then(() => {
+                // Backend has restarted. Wait for ttyd to initialize, then refresh iframe.
+                setTimeout(() => {
+                    const newTs = Date.now();
+                    const newKey = `${id}-${agentId}-none`;
+                    lastStartedKey.current = newKey;
+                    lastSuccessfulStartKey.current = newKey;
+                    setSessions(prev => prev.map(s => s.id === id ? { ...s, chatSessionId: '', lastActive: newTs } : s));
+                    setIsStarting(false);
+                }, 2500);
+            })
+            .catch(() => {
+                setIsStarting(false);
+            });
     };
 
     const [drawerOpen, setDrawerOpen] = useState(false);

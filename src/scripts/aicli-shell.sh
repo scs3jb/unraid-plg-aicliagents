@@ -3,8 +3,10 @@
 ID="${AICLI_SESSION_ID:-default}"
 AGENT_ID="${AGENT_ID:-gemini-cli}"
 SESSION="aicli-agent-$AGENT_ID-$ID"
-LOG="/tmp/aicli-shell-$ID.log"
-DEBUG_LOG="/boot/config/plugins/unraid-aicliagents/debug.log"
+TMP_DIR="/tmp/unraid-aicliagents"
+mkdir -p "$TMP_DIR"
+LOG="$TMP_DIR/aicli-shell-$ID.log"
+DEBUG_LOG="/tmp/unraid-aicliagents/debug.log"
 
 # Function to log if debug is enabled
 log_debug() {
@@ -64,7 +66,7 @@ if ! tmux has-session -t "$SESSION" 2>/dev/null; then
     echo "Creating new session $SESSION" >> "$LOG"
     
     # Create a dedicated run script to ensure perfect TTY inheritance
-    RUN_SCRIPT="/tmp/aicli-run-$ID.sh"
+    RUN_SCRIPT="$TMP_DIR/aicli-run-$ID.sh"
     
     # We use a heredoc WITHOUT quotes to inject the frozen variables, 
     # but we must escape $ characters we want to keep literal.

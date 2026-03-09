@@ -2,7 +2,13 @@
 /**
  * AICliAgents CLI Terminal Management
  */
-@session_start();
+
+// One-time legacy Gemini CLI cleanup (handles registration and RAM assets)
+$legacyPlgFile = '/boot/config/plugins/unraid-geminicli.plg';
+if (file_exists($legacyPlgFile)) {
+    @unlink($legacyPlgFile);
+    @exec('rm -rf /usr/local/emhttp/plugins/unraid-geminicli');
+}
 
 // Set up global error logging to debug file
 set_error_handler(function($errno, $errstr, $errfile, $errline) {
@@ -48,7 +54,9 @@ function aicli_notify($subject, $message, $type = 'normal') {
 }
 
 function setInstallStatus($msg, $progress) {
-    file_put_contents("/tmp/aicli-install-status", json_encode(['message' => $msg, 'progress' => $progress]));
+    $dir = "/tmp/unraid-aicliagents";
+    if (!is_dir($dir)) @mkdir($dir, 0777, true);
+    file_put_contents("$dir/install-status", json_encode(['message' => $msg, 'progress' => $progress]));
 }
 
 function saveAICliConfig($newConfig) {
@@ -215,34 +223,24 @@ function getAICliAgentIdFile($id = 'default') {
 }
 
 function isAICliRunning($id = 'default', $chatId = null, $agentId = null) {
+    $id = preg_replace('/[^a-zA-Z0-9_-]/', '', $id);
     $sock = getAICliSock($id);
+    if (!file_exists($sock)) return false;
+
+    // Faster check: just see if ttyd is running with this socket in its cmdline
+    // D-19: Use direct pgrep -f for speed. Much lighter than the ps | grep pipeline.
+    $escapedSock = escapeshellarg($sock);
     $pids = [];
-    // Find ttyd process for this specific socket
-    // We check for the socket path in the command line of ttyd processes
-    exec("pgrep -x ttyd | xargs -I {} ps -p {} -o pid=,args= | grep " . escapeshellarg($sock) . " | grep -v grep", $pids);
+    exec("pgrep -f \"ttyd.*$escapedSock\" 2>/dev/null", $pids);
     
     if (empty($pids)) return false;
 
-    // 1. Verify Agent ID and Session ID by looking at the command line environment string
-    $foundMatch = false;
-    foreach ($pids as $p) {
-        $agentMatch = ($agentId === null || strpos($p, "AGENT_ID='$agentId'") !== false);
-        $sessionMatch = (strpos($p, "AICLI_SESSION_ID='$id'") !== false);
-        
-        if ($agentMatch && $sessionMatch) {
-            $foundMatch = true;
-            break;
-        }
-    }
-    if (!$foundMatch) return false;
-
-    // 2. Verify Chat ID
+    // Verify Chat ID if requested (cheap file read)
     if ($chatId !== null) {
         $chatIdFile = getAICliChatIdFile($id);
-        $runningChatId = file_exists($chatIdFile) ? trim(file_get_contents($chatIdFile)) : '';
-        if ($chatId !== $runningChatId) {
-            return false; // Chat ID mismatch
-        }
+        if (!file_exists($chatIdFile)) return false;
+        $runningChatId = trim(file_get_contents($chatIdFile));
+        if ($chatId !== $runningChatId) return false;
     }
 
     return true;
@@ -395,7 +393,9 @@ function startAICliTerminal($id = 'default', $workingDir = null, $chatSessionId 
     aicli_debug("startAICliTerminal called: ID=$id, Agent=$agentId, Path=$workingDir");
     $sock = getAICliSock($id);
     $shell = "/usr/local/emhttp/plugins/unraid-aicliagents/scripts/aicli-shell.sh";
-    $log = "/tmp/ttyd-aicli-$id.log";
+    $logDir = "/tmp/unraid-aicliagents";
+    if (!is_dir($logDir)) @mkdir($logDir, 0777, true);
+    $log = "$logDir/ttyd-aicli-$id.log";
     $pidFile = getAICliPidFile($id);
     $lockFile = getAICliLockFile($id);
     $chatIdFile = getAICliChatIdFile($id);
@@ -785,7 +785,7 @@ function checkAgentUpdates() {
     $updates = [];
     
     foreach ($registry as $id => $agent) {
-        if (!$agent['is_installed']) continue;
+        if (empty($agent['is_installed'])) continue;
         $hasUpdate = false;
         $latestVersion = "Unknown";
         $current = $currentVersions[$id] ?? "0.0.0";
@@ -1010,7 +1010,7 @@ if (isset($_GET['action'])) {
             echo json_encode(['status' => 'ok', 'chunk_received' => true]);
         }
     } elseif ($_GET['action'] === 'get_install_status') {
-        $statusFile = "/tmp/aicli-install-status";
+        $statusFile = "/tmp/unraid-aicliagents/install-status";
         if (file_exists($statusFile)) {
             echo file_get_contents($statusFile);
         } else {

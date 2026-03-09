@@ -1,29 +1,25 @@
 <?xml version='1.0' standalone='yes'?>
 
-<PLUGIN name="unraid-aicliagents" author="John White" version="2026.03.06.03" launch="Settings/AICliAgentsManager" pluginURL="https://github.com/johnpwhite/unraid-plg-aicliagents/raw/main/unraid-aicliagents.plg" min="7.2.0" icon="unraid-aicliagents.png">
+<PLUGIN name="unraid-aicliagents" author="John White" version="2026.03.09.04" launch="Settings/AICliAgentsManager" pluginURL="https://github.com/johnpwhite/unraid-plg-aicliagents/raw/main/unraid-aicliagents.plg" min="7.2.0" icon="unraid-aicliagents.png">
 
 <CHANGES>
-## v2026.03.02.17
+## 2026.03.09.04
+- Feat: Expanded Agent Store with support for Claude Code, OpenCode, Kilo Code, Pi Coder, and Codex CLI.
+- Feat: Integrated Node.js Environment (v22.22.0) with npm for seamless agent installation and management.
+- Feat: Implemented Offline-Ready Boot Resiliency using persistent USB source caching. Plugin UI is now available instantly on reboot even without a network.
+- Improve: Hardware Optimization - Moved all installer and runtime logs to RAM (/tmp) to prevent USB flash drive wear.
+- Improve: Robust Installer - Complete refactor with strict permission enforcement (fixes 'opencode' access), CRLF normalization, and aggressive legacy cleanup.
+- Fix: Resolved 'Invalid .page format' and XML parsing errors by standardizing headers and escaping entities.
+- Fix: Enhanced uninstaller to safely preserve user settings and agent home directories during upgrades.
 
-- **Metadata Overlay**: Hover over any workspace tab to see its full filesystem path and active AICli Session ID.
-- **Session Reset**: Added a manual "RESET" button to the tab overlay to clear stuck sessions or start fresh conversations.
-- **Smart Workspace Isolation**: Robust project detection that ensures nested folders correctly maintain their own independent AICli sessions.
-- **Reliable Session Resumption**: Significant improvements to session recovery across server reboots and browser refreshes.
-- **Cleaner Tab Labels**: Redesigned tab titles that prioritize the workspace folder name and ONLY show status emojis (◇, ✦, ✋) when active.
-- **Polished Terminal UI**: Added a balanced 8px padding around the terminal with rounded corners and transparent background for better theme integration.
-- **Eliminated Scrollbars**: Implemented persistent suppression of internal and external scrollbars for a cleaner, full-screen terminal experience.
-- **Dependency Upgrades**: Upgraded to the latest stable versions of AICliAgents CLI (v0.31.0), Node.js (v22.22.0 LTS), and tmux (v3.6a).
-- **Improved Security**: Added CSRF validation for all state-changing AJAX actions.
+## 2026.03.06.03
+- Repository Migration: Migrated from Gemini CLI to AI CLI Agents.
 
-### v2026.02.27.20 - Initial Release: Key Features
-
-- **Native AI Integration**: Direct integration of Google AICli into the Unraid WebUI, providing a powerful AI agent for server management and coding tasks.
-- **Multi-Workspace Terminal**: Support for multiple terminal sessions (Workspaces). Open different folders in separate tabs to manage various projects simultaneously.
-- **Dynamic Status Tracking**: Tabs poll terminal state in real-time, displaying AICli's status icons (Ready ◇, Working ✦, Action Required ✋) and active task descriptions.
-- **Integrated File Browser**: Seamlessly navigate your server's filesystem to select and open new workspaces.
-- **Responsive Terminal Design**: A modern, high-performance terminal wrapper with dynamic resizing that automatically fills available screen space and fits perfectly above the footer.
-- **Unraid Theme Integration**: Harmonious UI design that matches your Unraid theme (Light/Dark) and respects standard system variables.
-- **Smart Session Management**: Persistent terminal sessions that remain active in the background, allowing you to switch between tasks without losing state.
+## 2026.02.27.20 - Initial Release: Key Features
+- Native AI Integration: Direct integration of Google AICli into the Unraid WebUI.
+- Multi-Workspace Terminal: Support for multiple terminal sessions (Workspaces).
+- Dynamic Status Tracking: Tabs poll terminal state in real-time.
+- Unraid Theme Integration: Harmonious UI design matching your Unraid theme.
 </CHANGES>
 
 
@@ -31,29 +27,88 @@
 <FILE Run="/bin/bash">
 <INLINE>
 #!/bin/bash
-set -e
 NAME="unraid-aicliagents"
-VERSION="2026.03.06.03"
+VERSION="2026.03.09.04"
 GIT_URL="https://github.com/johnpwhite/unraid-plg-aicliagents/raw/main"
 EMHTTP_DEST="/usr/local/emhttp/plugins/$NAME"
 CONFIG_DIR="/boot/config/plugins/$NAME"
 
-echo "--- INSTALL START ---"
+# Set up clean UI output on FD 3
+exec 3>&amp;1
+# Redirect detailed trace to /tmp (RAM-based to avoid USB wear)
+LOG_FILE="/tmp/unraid-aicliagents/install.log"
+mkdir -p /tmp/unraid-aicliagents
+echo "--- Install Start: $(date) (v$VERSION) ---" > "$LOG_FILE"
+exec > "$LOG_FILE" 2>&amp;1
+set -x # TRACING ENABLED
+
+# Helper for clean UI status
+status() {
+    echo "$1" >&amp;3
+}
+
+status "--- INSTALL START ---"
+mkdir -p "$CONFIG_DIR" # Keep this for CONFIG_DIR creation
+
 # Force aggressive cleanup of all existing AICli sessions to prevent upgrade conflicts
-echo "Cleaning up all existing AICli processes and sessions..."
+status "Cleaning up all existing AICli processes and sessions..."
 # 1. Kill all ttyd processes managing aicli or gemini sockets
-pgrep -f "ttyd.*(aicliterm|geminiterm)-" | xargs kill -9 > /dev/null 2>&amp;1 || true
+pgrep -f "ttyd.*(aicliterm|geminiterm)-" | xargs kill -9 &gt; /dev/null 2&gt;&amp;1 || true
+
 # 2. Kill all AICli or Gemini tmux sessions
-if command -v tmux >/dev/null 2>&amp;1; then
-    tmux ls -F '#S' 2>/dev/null | grep -E "^(aicli-agent|gemini-cli)-" | xargs -I {} tmux kill-session -t "{}" > /dev/null 2>&amp;1 || true
+if command -v tmux &gt;/dev/null 2&gt;&amp;1; then
+    tmux ls -F '#S' 2&gt;/dev/null | grep -E "^(aicli-agent|gemini-cli)-" | xargs -I {} tmux kill-session -t "{}" &gt; /dev/null 2&gt;&amp;1 || true
 fi
 # 3. Kill any orphaned aicli or gemini node processes
-pgrep -f "node.*(aicli|gemini).mjs" | xargs kill -9 > /dev/null 2>&amp;1 || true
+pgrep -f "node.*(aicli|gemini).mjs" | xargs kill -9 &gt; /dev/null 2&gt;&amp;1 || true
+
 # 4. Cleanup all run-state files
 rm -f /var/run/aicliterm-*.sock
 rm -f /var/run/unraid-aicliagents-*.pid
 rm -f /var/run/unraid-aicliagents-*.lock
 rm -f /var/run/unraid-aicliagents-*.chatid
+rm -f /var/run/unraid-aicliagents-*.agentid
+
+# Legacy Gemini &amp; Root /tmp Cleanup
+status "Cleaning up legacy temporary files..."
+rm -f /tmp/gemini-run-*.sh
+rm -f /tmp/gemini-shell-*.log
+rm -f /tmp/ttyd-gemini-*.log
+rm -f /tmp/aicli-run-*.sh
+rm -f /tmp/aicli-shell-*.log
+rm -f /tmp/ttyd-aicli-*.log
+rm -f /tmp/aicli-install-status
+
+# Legacy Gemini boot drive migration &amp; cleanup
+OLD_CONFIG="/boot/config/plugins/unraid-geminicli"
+if [ -d "$OLD_CONFIG" ]; then
+    status "Migrating legacy Gemini CLI configuration..."
+    # Copy existing config/secrets if they don't exist in the new location
+    mkdir -p "$CONFIG_DIR"
+    if [ ! -f "$CONFIG_DIR/unraid-aicliagents.cfg" ] &amp;&amp; [ -f "$OLD_CONFIG/unraid-geminicli.cfg" ]; then
+        cp "$OLD_CONFIG/unraid-geminicli.cfg" "$CONFIG_DIR/unraid-aicliagents.cfg"
+    fi
+    if [ ! -f "$CONFIG_DIR/secrets.cfg" ] &amp;&amp; [ -f "$OLD_CONFIG/secrets.cfg" ]; then
+        cp "$OLD_CONFIG/secrets.cfg" "$CONFIG_DIR/secrets.cfg"
+    fi
+    # Migrate home directory contents (history, cache, etc.)
+    if [ -d "$OLD_CONFIG/home" ]; then
+        mkdir -p "$CONFIG_DIR/home"
+        cp -rn "$OLD_CONFIG/home/"* "$CONFIG_DIR/home/" 2&gt;/dev/null || true
+    fi
+    
+    status "Removing legacy Gemini CLI folders..."
+    rm -rf "$OLD_CONFIG"
+fi
+
+# Thorough legacy registration cleanup to force removal from plugin list
+status "Cleaning up legacy registrations..."
+rm -f /boot/config/plugins/unraid-geminicli.plg
+rm -f /var/log/plugins/unraid-geminicli.plg
+rm -rf /usr/local/emhttp/plugins/unraid-geminicli
+
+# Ensure new subfolder exists
+mkdir -p /tmp/unraid-aicliagents
 
 # Aggressive cleanup of ALL previous assets to ensure fresh load
 rm -rf "$EMHTTP_DEST"
@@ -63,40 +118,73 @@ mkdir -p "$CONFIG_DIR"
 
 # 1. Download aicli.js to /boot (persistence)
 
-# 2. Download/Extract Portable Node.js (v22.22.0)
-NODE_TAR="node-v22.22.0-linux-x64.tar.xz"
-NODE_URL="https://nodejs.org/dist/v22.22.0/$NODE_TAR"
+# 2. Download/Install Portable Node.js (v22.22.0) with npm
+NODE_TAR="node-v22.22.0-linux-x64.tar.gz"
+NODE_URL="https://nodejs.org/dist/v22.22.0/node-v22.22.0-linux-x64.tar.gz"
 
 if [ ! -f "$CONFIG_DIR/$NODE_TAR" ]; then
-    echo "Downloading portable Node.js (v22.22.0)..."
+    status "Downloading full Node.js distribution (including npm)..."
     wget -q -O "$CONFIG_DIR/$NODE_TAR" "$NODE_URL"
 else
-    echo "Using cached Node.js (v22.22.0)..."
+    status "Using cached Node.js package..."
 fi
 
-echo "Extracting Node.js binary..."
+
+status "Installing Node.js and npm..."
 TMP_EXTRACT="/tmp/node-extract-$$"
 mkdir -p "$TMP_EXTRACT"
-tar -xf "$CONFIG_DIR/$NODE_TAR" -C "$TMP_EXTRACT"
+if ! tar -xf "$CONFIG_DIR/$NODE_TAR" -C "$TMP_EXTRACT" --no-same-owner; then
+    echo "ERROR: Node.js extraction failed. The download may be corrupted."
+    rm -f "$CONFIG_DIR/$NODE_TAR"
+    exit 1
+fi
 
-NODE_BIN=$(find "$TMP_EXTRACT" -name node -type f -executable | head -n 1)
-mv "$NODE_BIN" "$EMHTTP_DEST/bin/node"
-chmod +x "$EMHTTP_DEST/bin/node"
+NODE_DIR=$(find "$TMP_EXTRACT" -maxdepth 1 -mindepth 1 -type d -name "node-*" | head -n 1)
+
+if [ -z "$NODE_DIR" ]; then
+    echo "ERROR: Could not find extracted Node directory in $TMP_EXTRACT"
+    exit 1
+fi
+
+# Create target directories
+mkdir -p "$EMHTTP_DEST/bin"
+mkdir -p "$EMHTTP_DEST/lib"
+
+# Move binaries and lib to emhttp dest
+status "  &gt; Copying binaries..."
+cp -r "$NODE_DIR/bin/"* "$EMHTTP_DEST/bin/"
+status "  &gt; Copying libraries..."
+if [ -d "$NODE_DIR/lib" ]; then
+    cp -r "$NODE_DIR/lib/"* "$EMHTTP_DEST/lib/"
+fi
+
+# Robust chmod: avoid glob errors if directory is empty
+if ls "$EMHTTP_DEST/bin/"* &gt;/dev/null 2&gt;&amp;1; then
+    chmod +x "$EMHTTP_DEST/bin/"*
+fi
 rm -rf "$TMP_EXTRACT"
+
+# Create global symlinks for npm/npx if they don't exist
+if [ ! -L /usr/local/bin/npm ]; then
+    ln -sf "$EMHTTP_DEST/bin/npm" /usr/local/bin/npm
+fi
+if [ ! -L /usr/local/bin/npx ]; then
+    ln -sf "$EMHTTP_DEST/bin/npx" /usr/local/bin/npx
+fi
 
 # 3. Download/Install Portable tmux (v3.6a)
 TMUX_TAR="tmux-v3.6a.gz"
 TMUX_URL="https://github.com/mjakob-gh/build-static-tmux/releases/download/v3.6a/tmux.linux-amd64.gz"
 
 if [ ! -f "$CONFIG_DIR/$TMUX_TAR" ]; then
-    echo "Downloading portable tmux (v3.6a)..."
+    status "Downloading portable tmux (v3.6a)..."
     wget -q -O "$CONFIG_DIR/$TMUX_TAR" "$TMUX_URL"
 else
-    echo "Using cached tmux (v3.6a)..."
+    status "Using cached tmux (v3.6a)..."
 fi
 
-echo "Installing tmux..."
-gunzip -c "$CONFIG_DIR/$TMUX_TAR" > "$EMHTTP_DEST/bin/tmux"
+status "Installing tmux..."
+gunzip -c "$CONFIG_DIR/$TMUX_TAR" &gt; "$EMHTTP_DEST/bin/tmux"
 chmod +x "$EMHTTP_DEST/bin/tmux"
 
 # 4. Download/Install Portable fd (v10.3.0) and ripgrep (v14.1.0)
@@ -107,13 +195,13 @@ RG_URL="https://github.com/BurntSushi/ripgrep/releases/download/14.1.0/$RG_TAR"
 
 # 4a. Install fd
 if [ ! -f "$CONFIG_DIR/$FD_TAR" ]; then
-    echo "Downloading portable fd (v10.3.0)..."
+    status "Downloading portable fd (v10.3.0)..."
     wget -q -O "$CONFIG_DIR/$FD_TAR" "$FD_URL"
 else
-    echo "Using cached fd (v10.3.0)..."
+    status "Using cached fd (v10.3.0)..."
 fi
 
-echo "Extracting fd..."
+status "Extracting fd..."
 TMP_EXTRACT_FD="/tmp/fd-extract-$$"
 mkdir -p "$TMP_EXTRACT_FD"
 tar -xf "$CONFIG_DIR/$FD_TAR" -C "$TMP_EXTRACT_FD" --no-same-owner
@@ -124,13 +212,13 @@ rm -rf "$TMP_EXTRACT_FD"
 
 # 4b. Install ripgrep
 if [ ! -f "$CONFIG_DIR/$RG_TAR" ]; then
-    echo "Downloading portable ripgrep (14.1.0)..."
+    status "Downloading portable ripgrep (14.1.0)..."
     wget -q -O "$CONFIG_DIR/$RG_TAR" "$RG_URL"
 else
-    echo "Using cached ripgrep (14.1.0)..."
+    status "Using cached ripgrep (14.1.0)..."
 fi
 
-echo "Extracting ripgrep..."
+status "Extracting ripgrep..."
 TMP_EXTRACT_RG="/tmp/ripgrep-extract-$$"
 mkdir -p "$TMP_EXTRACT_RG"
 tar -xf "$CONFIG_DIR/$RG_TAR" -C "$TMP_EXTRACT_RG" --no-same-owner
@@ -155,57 +243,95 @@ ln -sf "$EMHTTP_DEST/bin/fd" /usr/local/bin/fd
 ln -sf "$EMHTTP_DEST/bin/rg" /usr/local/bin/rg
 
 # 6. Download/Install Plugin Files
+CACHE_SRC="$CONFIG_DIR/pkg-cache/source"
+mkdir -p "$CACHE_SRC"
+
 download_file() {
     local src=$1
     local dest=$2
     local dir=$(dirname "$EMHTTP_DEST/$dest")
     mkdir -p "$dir"
-    echo "Downloading $dest..."
-    # Bypass caching
-    wget -q -O "$EMHTTP_DEST/$dest" "$GIT_URL/$src?v=$VERSION"
-    if [[ "$dest" == *.sh || "$dest" == *.php || "$dest" == *.page ]]; then
-        sed -i 's/\r$//' "$EMHTTP_DEST/$dest"
+    
+    local file_name=$(basename "$dest")
+    local cache_file="$CACHE_SRC/$file_name"
+    local dest_file="$EMHTTP_DEST/$dest"
+
+    echo "Installing $dest..."
+
+    # 1. Use Cache if it exists (Crucial for booting without network)
+    if [ -f "$cache_file" ]; then
+        echo "  -&gt; Loading from USB Cache: $cache_file"
+        cp "$cache_file" "$dest_file"
+    else
+        # 2. Fallback to wget if not in cache (e.g. initial install)
+        echo "  -&gt; Downloading from network..."
+        if ! wget -q -O "$dest_file.tmp" "$GIT_URL/$src"; then
+            echo "FAILED to download $dest"
+            return 1
+        fi
+
+        # 3. CRLF fix for Windows line endings
+        if [[ "$dest" == *.sh || "$dest" == *.php || "$dest" == *.page || "$dest" == *.css || "$dest" == *.js || "$dest" == *.md ]]; then
+            tr -d '\r' &lt; "$dest_file.tmp" &gt; "$dest_file"
+            rm -f "$dest_file.tmp"
+        else
+            mv "$dest_file.tmp" "$dest_file"
+        fi
+
+        # 4. Populate cache for next reboot
+        cp "$dest_file" "$cache_file"
+        echo "  -&gt; Cached to USB: $cache_file"
     fi
+    return 0
 }
 
-download_file "src/scripts/aicli-shell.sh" "scripts/aicli-shell.sh"
+status "Installing plugin UI and scripts..."
+download_file "src/scripts/aicli-shell.sh" "scripts/aicli-shell.sh" || exit 1
 chmod +x "$EMHTTP_DEST/scripts/aicli-shell.sh"
 
-download_file "src/AICliAgents.page" "AICliAgents.page"
-download_file "src/AICliAgentsManager.page" "AICliAgentsManager.page"
-download_file "src/AICliAjax.php" "AICliAjax.php"
-download_file "src/includes/AICliAgentsManager.php" "includes/AICliAgentsManager.php"
-download_file "src/assets/ui/index.js" "assets/ui/index.js"
-download_file "src/assets/ui/index.css" "assets/ui/index.css"
-download_file "src/assets/icons/gemini.png" "assets/icons/gemini.png"
-download_file "src/assets/icons/claude.ico" "assets/icons/claude.ico"
-download_file "src/assets/icons/opencode.ico" "assets/icons/opencode.ico"
-download_file "src/assets/icons/kilocode.ico" "assets/icons/kilocode.ico"
-download_file "src/assets/icons/picoder.png" "assets/icons/picoder.png"
-download_file "src/assets/icons/codex.png" "assets/icons/codex.png"
-download_file "src/unraid-aicliagents.png" "unraid-aicliagents.png"
-download_file "src/README.md" "README.md"
+download_file "src/AICliAgents.page" "AICliAgents.page" || exit 1
+download_file "src/AICliAgentsManager.page" "AICliAgentsManager.page" || exit 1
+download_file "src/AICliAjax.php" "AICliAjax.php" || exit 1
+download_file "src/includes/AICliAgentsManager.php" "includes/AICliAgentsManager.php" || exit 1
+download_file "src/assets/ui/index.js" "assets/ui/index.js" || exit 1
+download_file "src/assets/ui/index.css" "assets/ui/index.css" || exit 1
+download_file "src/assets/icons/gemini.png" "assets/icons/gemini.png" || exit 1
+download_file "src/assets/icons/claude.ico" "assets/icons/claude.ico" || exit 1
+download_file "src/assets/icons/opencode.ico" "assets/icons/opencode.ico" || exit 1
+download_file "src/assets/icons/kilocode.ico" "assets/icons/kilocode.ico" || exit 1
+download_file "src/assets/icons/picoder.png" "assets/icons/picoder.png" || exit 1
+download_file "src/assets/icons/codex.png" "assets/icons/codex.png" || exit 1
+download_file "src/unraid-aicliagents.png" "unraid-aicliagents.png" || exit 1
+download_file "src/README.md" "README.md" || exit 1
 
 # 6. Restore Cached Agents to RAM
 CACHE_DIR="$CONFIG_DIR/pkg-cache"
 RAM_BIN="$EMHTTP_DEST/bin"
 mkdir -p "$RAM_BIN"
 if [ -d "$CACHE_DIR" ]; then
-    echo "Checking for cached agents..."
+    status "Restoring cached agents to RAM..."
     # Use a nullglob to avoid literal *.tar.gz if none exist
     shopt -s nullglob
     for pkg in "$CACHE_DIR"/*.tar.gz; do
         PKG_NAME=$(basename "$pkg" .tar.gz)
-        echo "  > Unpacking $PKG_NAME..."
+        echo "  &gt; Unpacking $PKG_NAME..."
         tar -xzf "$pkg" -C "$RAM_BIN/" --no-same-owner || echo "    ! Failed to unpack $pkg"
     done
     shopt -u nullglob
 fi
 
 # Sync menu visibility after install
-php -r "require_once '/usr/local/emhttp/plugins/unraid-aicliagents/includes/AICliAgentsManager.php'; \$config = getAICliConfig(); updateAICliMenuVisibility(\$config['enable_tab']); saveAICliConfig(['version' => '2026.03.06.03']);"
+php -r "require_once '/usr/local/emhttp/plugins/unraid-aicliagents/includes/AICliAgentsManager.php'; \$config = getAICliConfig(); updateAICliMenuVisibility(\$config['enable_tab']); saveAICliConfig(['version' =&gt; '2026.03.09.04']);"
 
-echo "--- INSTALL COMPLETE ---"
+# Final Permission enforcement
+status "Setting permissions..."
+find "$EMHTTP_DEST" -type d -exec chmod 755 {} \;
+find "$EMHTTP_DEST" -type f -exec chmod 644 {} \;
+chmod -R 755 "$EMHTTP_DEST/scripts" 2&gt;/dev/null || true
+chmod -R 755 "$EMHTTP_DEST/bin" 2&gt;/dev/null || true
+
+status "--- INSTALL COMPLETE ---"
+echo "--- Install Complete: $(date) ---" &gt;&gt; "$LOG_FILE"
 </INLINE>
 </FILE>
 
@@ -240,15 +366,34 @@ rm -f /tmp/ttyd-aicli-*.log
 
 # 5. Remove binaries and wrappers
 rm -rf "$PLUGIN_DIR"
-rm -f /usr/local/bin/aicli
-# Only remove tmux symlink if it points to our binary
-if [ -L /usr/local/bin/tmux ] &amp;&amp; readlink /usr/local/bin/tmux | grep -q "$NAME"; then
-    rm -f /usr/local/bin/tmux
-fi
-rm -f /usr/local/bin/fd
-rm -f /usr/local/bin/rg
+
+# Clean up global symlinks ONLY if they point to our plugin
+cleanup_link() {
+    local link=$1
+    if [ -L "$link" ] &amp;&amp; readlink "$link" | grep -q "$NAME"; then
+        echo "  &gt; Removing symlink: $link"
+        rm -f "$link"
+    fi
+}
+
+cleanup_link "/usr/local/bin/aicli"
+cleanup_link "/usr/local/bin/tmux"
+cleanup_link "/usr/local/bin/fd"
+cleanup_link "/usr/local/bin/rg"
+cleanup_link "/usr/local/bin/npm"
+cleanup_link "/usr/local/bin/npx"
 
 removepkg "$NAME" &gt; /dev/null 2&gt;&amp;1
+
+# 7. Remove system files (keep config on boot drive per user request)
+echo "Cleaning up system files..."
+# rm -rf "/boot/config/plugins/$NAME"  # PRESERVED: User settings and home directory
+# rm -f "/boot/config/plugins/$NAME.plg"  # Natively handled by 'plugin remove'
+
+# Also clean up any legacy Gemini CLI remnants (except config to preserve settings)
+rm -f /boot/config/plugins/unraid-geminicli.plg
+rm -rf /usr/local/emhttp/plugins/unraid-geminicli
+
 echo "Uninstall of $NAME complete."
 exit 0
 </INLINE>
