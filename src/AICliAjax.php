@@ -176,7 +176,9 @@ if (isset($_GET['action'])) {
     } elseif ($action === 'get_log') {
         $logFile = "/tmp/unraid-aicliagents/debug.log";
         if (file_exists($logFile)) {
-            $lines = aicli_tail($logFile, 50);
+            $config = getAICliConfig();
+            $maxLines = intval($config['log_max_lines'] ?? 250);
+            $lines = aicli_tail($logFile, $maxLines);
             echo implode("\n", $lines);
         } else {
             echo "Log is empty or does not exist.";

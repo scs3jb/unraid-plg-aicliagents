@@ -48,5 +48,29 @@ When you switch the **Terminal User** (e.g., from `root` to `aicliagent`), the p
 ### Manual Synchronization:
 You can force an immediate sync at any time by clicking the **Sync Now** button in the **Session Profile** settings. This is recommended before performing a manual reboot of the Unraid server.
 
+## 5. Direct SSH & Remote Terminal Access
+
+If you need to drop into a standard Unraid shell (via SSH or the web console) and run the agents directly, follow these steps to ensure your environment is consistent with the plugin's persistence system.
+
+### One-Liner Environment Setup
+Run this in your shell to correctly set the Node path and persistence redirect:
+```bash
+export PATH="/usr/local/emhttp/plugins/unraid-aicliagents/bin:$PATH"
+export HOME="/tmp/unraid-aicliagents/work/$(whoami)/home"
+```
+
+### Agent-Specific Execution
+Once the environment is set, you can execute agents directly using their absolute paths:
+
+- **Claude**: `/usr/local/emhttp/plugins/unraid-aicliagents/agents/claude-code/node_modules/.bin/claude`
+- **OpenCode**: `/usr/local/emhttp/plugins/unraid-aicliagents/agents/opencode/node_modules/.bin/opencode`
+- **Gemini CLI**: `/usr/local/emhttp/plugins/unraid-aicliagents/agents/gemini-cli/node_modules/.bin/gemini`
+- **NanoCoder**: `/usr/local/emhttp/plugins/unraid-aicliagents/agents/nanocoder/node_modules/.bin/nanocoder`
+
+> [!TIP]
+> **Persistence Warning**: If you run agents without setting the `HOME` variable as shown above, your chat history and configurations will NOT be synced to the Flash drive and will be lost on the next server reboot or plugin update.
+
 ---
-*Version: 2026.03.17*
+*Version: 2026.03.27*
+
+

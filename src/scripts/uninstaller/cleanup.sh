@@ -24,7 +24,7 @@ fi
 
 # 5. Kill orphaned agent node processes
 status "Terminating orphaned node binaries..."
-pgrep -f "node.*(aicli|gemini).mjs" | xargs kill -9 > /dev/null 2>&1 || true
+pgrep -f "node.*(gemini|opencode|nanocoder|claude|kilo|pi|codex|factory)" | xargs kill -9 > /dev/null 2>&1 || true
 
 status "Cleaning up runtime files and locks..."
 rm -f /var/run/aicliterm-*.sock

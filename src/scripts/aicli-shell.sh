@@ -14,6 +14,8 @@ USER_WORK_DIR="$TMP_DIR/work/$USER_NAME"
 [ ! -d "$USER_WORK_DIR" ] && mkdir -p "$USER_WORK_DIR"
 
 DEBUG_LOG="/tmp/unraid-aicliagents/debug.log"
+EMHTTP_DEST="/usr/local/emhttp/plugins/unraid-aicliagents"
+
 
 log_aicli() {
     local level_name="$1"
@@ -62,38 +64,40 @@ trap_exit() {
     cleanup
 }
 trap trap_exit EXIT
-
 # TMUX EXECUTION
 if ! tmux has-session -t "$SESSION" 2>/dev/null; then
-    # Capture ALL exported variables from the current environment
-    # We filter out internal bash vars and common system vars that change per session
-    ENV_EXPORTS=$(export -p | grep -vE ' (BASH_.*|SHELLOPTS|PWD|SHLVL|_)=' | grep -v "declare -fr")
-
     RUN_SCRIPT="$USER_WORK_DIR/aicli-run-$ID.sh"
-    cat << EOF > "$RUN_SCRIPT"
-#!/bin/bash
-# Propagate environment from parent shell
-$ENV_EXPORTS
 
-export HOME="$HOME_DIR"
-export PATH="$PATH"
+    # 1. Minimal Header (Safe injections only)
+    echo "#!/bin/bash" > "$RUN_SCRIPT"
+    printf 'export AGENT_ID=%q\n' "$AGENT_ID" >> "$RUN_SCRIPT"
+    printf 'export HOME=%q\n' "$HOME_DIR" >> "$RUN_SCRIPT"
+    printf 'export PATH=%q\n' "$PATH" >> "$RUN_SCRIPT"
+    printf 'export frozen_binary=%q\n' "$frozen_binary" >> "$RUN_SCRIPT"
+    printf 'export frozen_resume_cmd=%q\n' "$frozen_resume_cmd" >> "$RUN_SCRIPT"
+    printf 'export frozen_resume_latest=%q\n' "$frozen_resume_latest" >> "$RUN_SCRIPT"
+    printf 'export frozen_chat_id=%q\n' "$frozen_chat_id" >> "$RUN_SCRIPT"
+
+    # 2. Minimalist Logic (No DB repair for this test)
+    cat << 'EOF' >> "$RUN_SCRIPT"
 export TERM=xterm-256color
-export COLORTERM=truecolor
+export LC_ALL=en_US.UTF-8
 stty sane 2>/dev/null
-export PI_OFFLINE=1
 
 while true; do
     clear
-    bin_path=\$(echo "$frozen_binary" | awk '{print \$NF}')
-    if [[ "$frozen_binary" == *"node "* ]] && [ ! -f "\$bin_path" ]; then
-        echo -e "\033[1;31mERROR: Agent binary not found at \$bin_path\033[0m"
-        read -t 10 -r
-        exit 1
+
+    # D-52: SURGICAL DB REPAIR (Safe Version)
+    # We only nuke the WAL/SHM for OpenCode to break the lock loop.
+    if [[ "$AGENT_ID" == "opencode" ]]; then
+       db_file="$HOME/.local/share/opencode/opencode.db"
+       rm -f "$db_file-wal" "$db_file-shm" 2>/dev/null
     fi
 
+    # D-49: Minimalist launch logic
     if [ -n "$frozen_chat_id" ] && [ "$frozen_chat_id" != "none" ]; then
         FINAL_CMD="${frozen_resume_cmd//\{chatId\}/$frozen_chat_id}"
-        eval "\$FINAL_CMD" || eval "$frozen_resume_latest" || eval "$frozen_binary"
+        eval "$FINAL_CMD" || eval "$frozen_resume_latest" || eval "$frozen_binary"
     else
         eval "$frozen_resume_latest" || eval "$frozen_binary"
     fi
@@ -101,6 +105,10 @@ while true; do
     read -t 3 -r
 done
 EOF
+
+
+
+
     chmod +x "$RUN_SCRIPT"
     tmux -u new-session -d -s "$SESSION" -x 200 -y 80 "$RUN_SCRIPT"
 fi

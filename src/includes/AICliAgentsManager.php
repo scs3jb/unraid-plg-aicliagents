@@ -42,10 +42,13 @@ function aicli_init_plugin() {
     // 2. Kill all tmux sessions matching our pattern to clear ghosts
     exec("tmux ls -F '#S' 2>/dev/null | grep -E '^aicli-agent-' | xargs -I {} tmux kill-session -t {} > /dev/null 2>&1");
     
-    // 3. Kill all standalone ttyd instances
+    // 4. Kill all standalone ttyd instances
     exec("pkill -9 -x ttyd > /dev/null 2>&1");
     
-    // 4. Clean up stale sockets and PIDs
+    // 5. Kill all known agent binaries (orphaned node processes)
+    exec("pkill -9 -f 'node.*(gemini|opencode|nanocoder|claude|kilo|pi|codex|factory)' > /dev/null 2>&1");
+    
+    // 6. Clean up stale sockets and PIDs
     exec("rm -f /var/run/aicliterm-*.sock");
     exec("rm -f /var/run/unraid-aicliagents-*.pid");
     exec("rm -f /tmp/unraid-aicliagents/sync-daemon-*.pid");
@@ -66,7 +69,6 @@ function aicli_ensure_init() {
 
 // Set up global error logging to debug file
 set_error_handler(function($errno, $errstr, $errfile, $errline) {
-    // Check if error was suppressed with @ (works for PHP 7 and 8)
     if (error_reporting() === 0) return false;
     aicli_log("PHP ERROR [$errno]: $errstr in $errfile on line $errline", AICLI_LOG_ERROR);
     return false;
@@ -81,6 +83,7 @@ set_exception_handler(function($e) {
 function aicli_get_formatted_timestamp() {
     return date("Y-m-d H:i:s");
 }
+
 
 // Logging Levels are defined at the top of the file
 
@@ -102,7 +105,7 @@ function aicli_log($msg, $level = AICLI_LOG_INFO) {
     if ($level > $currentLevel && $level > AICLI_LOG_WARN) return;
 
     $levelNames = [0 => 'ERROR', 1 => 'WARN', 2 => 'INFO', 3 => 'DEBUG'];
-    $levelName = $levelNames[$level] ?? 'UNKNOWN';
+    $levelStr = $levelNames[$level] ?? 'UNKNOWN';
 
     $msgStr = is_string($msg) ? $msg : json_encode($msg);
     $logDir = "/tmp/unraid-aicliagents";
@@ -112,14 +115,20 @@ function aicli_log($msg, $level = AICLI_LOG_INFO) {
     }
     $logFile = "$logDir/debug.log";
 
-    if (file_exists($logFile) && filesize($logFile) > 1048576) {
-        $tail = @file_get_contents($logFile, false, null, -524288);
-        @file_put_contents($logFile, "--- LOG TRUNCATED ---\n" . $tail);
-    }
-
     $timestamp = aicli_get_formatted_timestamp();
-    $output = "[$timestamp] [$levelName] $msgStr\n";
-    @file_put_contents($logFile, $output, FILE_APPEND);
+    $logLine = "[$timestamp] [$levelStr] $msgStr\n";
+    @file_put_contents($logFile, $logLine, FILE_APPEND);
+    
+    // Prune log periodically (1% chance on log call to save IO)
+    // Prune log periodically (1% chance on log call to save IO)
+    if (rand(1, 100) === 1) {
+        $maxMb = 50; 
+        if (file_exists($logFile) && filesize($logFile) > $maxMb * 1024 * 1024) {
+            $lines = [];
+            exec("tail -n 5000 " . escapeshellarg($logFile) . " 2>&1", $lines);
+            file_put_contents($logFile, "[LOG PRUNED - Size exceeded {$maxMb}MB]\n" . implode("\n", $lines));
+        }
+    }
     
     if (function_exists('posix_getuid') && @fileowner($logFile) === posix_getuid()) {
         @chmod($logFile, 0666);
@@ -320,7 +329,6 @@ function aicli_sync_home($username, $force = false) {
     }
     
     $cmd = "rsync -rltD --delete --no-p --no-g --no-o --modify-window=2 --itemize-changes " .
-           "--exclude='*.db-wal' --exclude='*.db-shm' " .
            escapeshellarg($ramDir . "/") . " " . escapeshellarg($flashDir . "/");
            
     exec("cd / && " . $cmd . " 2>&1", $out, $res);
@@ -743,6 +751,40 @@ function getAICliTtydTheme($theme) {
     }
 }
 
+function aicli_pre_flight_check($agentId, $homePath, $workingDir) {
+    if ($agentId !== 'opencode' && $agentId !== 'nanocoder' && $agentId !== 'claude-code') return;
+
+    $dbFiles = [];
+    
+    // 1. Check global agent data dir
+    if ($agentId === 'opencode') {
+        $dbFiles[] = "$homePath/.local/share/opencode/opencode.db";
+        // Also check if workspace has a local storage DB
+        if (!empty($workingDir) && is_dir("$workingDir/.opencode/storage")) {
+            $dbFiles[] = "$workingDir/.opencode/storage/opencode.db";
+        }
+    } elseif ($agentId === 'claude-code') {
+         $dbFiles[] = "$homePath/.local/share/claude-code/claude-code.db";
+    }
+
+    foreach ($dbFiles as $db) {
+        if (file_exists($db)) {
+            aicli_log("[Pre-Flight] Repairing/Checkpointing SQLite DB: $db", AICLI_LOG_INFO);
+            
+            // D-46: Forced Checkpoint (TRUNCATE) merges WAL into main DB and resets journal.
+            // This fixes consistency issues caused by missing WAL files after RAM/Flash syncs.
+            $cmd = "sqlite3 " . escapeshellarg($db) . " 'PRAGMA wal_checkpoint(TRUNCATE);' 2>&1";
+            exec($cmd, $out, $res);
+            
+            if ($res !== 0) {
+                aicli_log("[Pre-Flight] WARN: DB Checkpoint failed for $db (Code $res): " . implode("\n", $out), AICLI_LOG_WARN);
+            } else {
+                aicli_log("[Pre-Flight] DB Checkpoint successful for $db", AICLI_LOG_DEBUG);
+            }
+        }
+    }
+}
+
 function getAICliPidFile($id = 'default') {
     return "/var/run/unraid-aicliagents-$id.pid";
 }
@@ -861,27 +903,28 @@ function getAICliNpmMap() {
         'kilocode' => '@kilocode/cli',
         'pi-coder' => '@mariozechner/pi-coding-agent',
         'codex-cli' => '@openai/codex',
-        'factory-cli' => '@factory/cli'
+        'factory-cli' => '@factory/cli',
+        'nanocoder' => '@nanocollective/nanocoder'
     ];
 }
 
 function getAICliAgentsRegistry() {
     $manifestFile = "/boot/config/plugins/unraid-aicliagents/agents.json";
-    $binDir = "/usr/local/emhttp/plugins/unraid-aicliagents/bin";
-    $bootConfig = "/boot/config/plugins/unraid-aicliagents";
-
+    $agentBase = "/usr/local/emhttp/plugins/unraid-aicliagents/agents";
+    
     $defaultRegistry = [
         'gemini-cli' => [
             'id' => 'gemini-cli',
             'name' => 'Gemini CLI',
-            'icon_url' => '/plugins/unraid-aicliagents/unraid-aicliagents.png',
-            'release_notes' => 'https://github.com/google-gemini/gemini-cli/releases',
+            'icon_url' => '/plugins/unraid-aicliagents/assets/icons/google-gemini.png?v=' . ($config['version'] ?? 'stable'),
+            'release_notes' => 'https://www.npmjs.com/package/@google/gemini-cli?activeTab=versions',
             'runtime' => 'node',
-            'binary' => "$binDir/node_modules/.bin/gemini",
-            'resume_cmd' => "$binDir/node_modules/.bin/gemini --resume {chatId}",
-            'resume_latest' => "$binDir/node_modules/.bin/gemini --resume",
+            'binary' => "$agentBase/gemini-cli/node_modules/.bin/gemini",
+            'binary_fallback' => "$agentBase/gemini-cli/node_modules/@google/gemini-cli/bin/aicli.js",
+            'resume_cmd' => "$agentBase/gemini-cli/node_modules/.bin/gemini --resume {chatId}",
+            'resume_latest' => "$agentBase/gemini-cli/node_modules/.bin/gemini --resume",
             'env_prefix' => 'GEMINI',
-            'is_installed' => file_exists("$binDir/node_modules/.bin/gemini")
+            'is_installed' => file_exists("$agentBase/gemini-cli/node_modules/.bin/gemini") || file_exists("$agentBase/gemini-cli/node_modules/@google/gemini-cli/bin/aicli.js")
         ],
         'claude-code' => [
             'id' => 'claude-code',
@@ -889,11 +932,11 @@ function getAICliAgentsRegistry() {
             'icon_url' => '/plugins/unraid-aicliagents/assets/icons/claude.ico',
             'release_notes' => 'https://www.npmjs.com/package/@anthropic-ai/claude-code?activeTab=versions',
             'runtime' => 'node',
-            'binary' => "$binDir/node_modules/.bin/claude",
-            'resume_cmd' => "$binDir/node_modules/.bin/claude --resume {chatId}",
-            'resume_latest' => "$binDir/node_modules/.bin/claude --continue",
+            'binary' => "$agentBase/claude-code/node_modules/.bin/claude",
+            'resume_cmd' => "$agentBase/claude-code/node_modules/.bin/claude --resume {chatId}",
+            'resume_latest' => "$agentBase/claude-code/node_modules/.bin/claude --continue",
             'env_prefix' => 'CLAUDE',
-            'is_installed' => file_exists("$binDir/node_modules/.bin/claude")
+            'is_installed' => file_exists("$agentBase/claude-code/node_modules/.bin/claude")
         ],
         'opencode' => [
             'id' => 'opencode',
@@ -901,11 +944,11 @@ function getAICliAgentsRegistry() {
             'icon_url' => '/plugins/unraid-aicliagents/assets/icons/opencode.ico',
             'release_notes' => 'https://github.com/anomalyco/opencode/releases',
             'runtime' => 'node',
-            'binary' => "$binDir/node_modules/.bin/opencode",
-            'resume_cmd' => "$binDir/node_modules/.bin/opencode --session {chatId}",
-            'resume_latest' => "$binDir/node_modules/.bin/opencode --continue",
+            'binary' => "$agentBase/opencode/node_modules/.bin/opencode",
+            'resume_cmd' => "$agentBase/opencode/node_modules/.bin/opencode --session {chatId}",
+            'resume_latest' => "$agentBase/opencode/node_modules/.bin/opencode --continue",
             'env_prefix' => 'OPENCODE',
-            'is_installed' => file_exists("$binDir/node_modules/.bin/opencode")
+            'is_installed' => file_exists("$agentBase/opencode/node_modules/.bin/opencode")
         ],
         'kilocode' => [
             'id' => 'kilocode',
@@ -913,11 +956,11 @@ function getAICliAgentsRegistry() {
             'icon_url' => '/plugins/unraid-aicliagents/assets/icons/kilocode.ico',
             'release_notes' => 'https://github.com/Kilo-Org/kilocode/releases',
             'runtime' => 'node',
-            'binary' => "$binDir/node_modules/.bin/kilo",
-            'resume_cmd' => "$binDir/node_modules/.bin/kilo --session {chatId}",
-            'resume_latest' => "$binDir/node_modules/.bin/kilo --continue",
+            'binary' => "$agentBase/kilocode/node_modules/.bin/kilo",
+            'resume_cmd' => "$agentBase/kilocode/node_modules/.bin/kilo --session {chatId}",
+            'resume_latest' => "$agentBase/kilocode/node_modules/.bin/kilo --continue",
             'env_prefix' => 'KILOCODE',
-            'is_installed' => file_exists("$binDir/node_modules/.bin/kilo")
+            'is_installed' => file_exists("$agentBase/kilocode/node_modules/.bin/kilo")
         ],
         'pi-coder' => [
             'id' => 'pi-coder',
@@ -925,11 +968,11 @@ function getAICliAgentsRegistry() {
             'icon_url' => '/plugins/unraid-aicliagents/assets/icons/picoder.png',
             'release_notes' => 'https://github.com/badlogic/pi-mono/releases',
             'runtime' => 'node',
-            'binary' => "$binDir/node_modules/.bin/pi",
-            'resume_cmd' => "$binDir/node_modules/.bin/pi",
-            'resume_latest' => "$binDir/node_modules/.bin/pi",
+            'binary' => "$agentBase/pi-coder/node_modules/.bin/pi",
+            'resume_cmd' => "$agentBase/pi-coder/node_modules/.bin/pi",
+            'resume_latest' => "$agentBase/pi-coder/node_modules/.bin/pi",
             'env_prefix' => 'PI_CODER',
-            'is_installed' => file_exists("$binDir/node_modules/.bin/pi")
+            'is_installed' => file_exists("$agentBase/pi-coder/node_modules/.bin/pi")
         ],
         'codex-cli' => [
             'id' => 'codex-cli',
@@ -937,11 +980,11 @@ function getAICliAgentsRegistry() {
             'icon_url' => '/plugins/unraid-aicliagents/assets/icons/codex.png',
             'release_notes' => 'https://www.npmjs.com/package/@openai/codex?activeTab=versions',
             'runtime' => 'node',
-            'binary' => "$binDir/node_modules/.bin/codex",
-            'resume_cmd' => "$binDir/node_modules/.bin/codex",
-            'resume_latest' => "$binDir/node_modules/.bin/codex",
+            'binary' => "$agentBase/codex-cli/node_modules/.bin/codex",
+            'resume_cmd' => "$agentBase/codex-cli/node_modules/.bin/codex",
+            'resume_latest' => "$agentBase/codex-cli/node_modules/.bin/codex",
             'env_prefix' => 'CODEX',
-            'is_installed' => file_exists("$binDir/node_modules/.bin/codex")
+            'is_installed' => file_exists("$agentBase/codex-cli/node_modules/.bin/codex")
         ],
         'factory-cli' => [
             'id' => 'factory-cli',
@@ -949,11 +992,23 @@ function getAICliAgentsRegistry() {
             'icon_url' => '/plugins/unraid-aicliagents/assets/icons/factory.png',
             'release_notes' => 'https://www.npmjs.com/package/@factory/cli?activeTab=versions',
             'runtime' => 'node',
-            'binary' => "$binDir/node_modules/.bin/droid",
-            'resume_cmd' => "$binDir/node_modules/.bin/droid",
-            'resume_latest' => "$binDir/node_modules/.bin/droid",
+            'binary' => "$agentBase/factory-cli/node_modules/.bin/droid",
+            'resume_cmd' => "$agentBase/factory-cli/node_modules/.bin/droid",
+            'resume_latest' => "$agentBase/factory-cli/node_modules/.bin/droid",
             'env_prefix' => 'FACTORY',
-            'is_installed' => file_exists("$binDir/node_modules/.bin/droid")
+            'is_installed' => file_exists("$agentBase/factory-cli/node_modules/.bin/droid")
+        ],
+        'nanocoder' => [
+            'id' => 'nanocoder',
+            'name' => 'NanoCoder',
+            'icon_url' => '/plugins/unraid-aicliagents/assets/icons/nanocoder.png',
+            'release_notes' => 'https://www.npmjs.com/package/@nanocollective/nanocoder?activeTab=versions',
+            'runtime' => 'node',
+            'binary' => "$agentBase/nanocoder/node_modules/.bin/nanocoder",
+            'resume_cmd' => "$agentBase/nanocoder/node_modules/.bin/nanocoder",
+            'resume_latest' => "$agentBase/nanocoder/node_modules/.bin/nanocoder",
+            'env_prefix' => 'NANO',
+            'is_installed' => file_exists("$agentBase/nanocoder/node_modules/.bin/nanocoder")
         ]
     ];
 
@@ -1043,7 +1098,8 @@ function startAICliTerminal($id = 'default', $workingDir = null, $chatSessionId 
     $agentIdFile = getAICliAgentIdFile($id);
 
     // D-04: Define $binDir (was undefined in this scope)
-    $binDir = "/usr/local/emhttp/plugins/unraid-aicliagents/bin";
+    $binDir = "/usr/local/emhttp/plugins/unraid-aicliagents/bin"; // This is the old binDir, but still used for some legacy checks.
+    $agentBase = "/usr/local/emhttp/plugins/unraid-aicliagents/agents"; // New base for agent installations
 
     $registry = getAICliAgentsRegistry();
     $agent = $registry[$agentId] ?? $registry['gemini-cli'];
@@ -1059,6 +1115,9 @@ function startAICliTerminal($id = 'default', $workingDir = null, $chatSessionId 
     // Ensure Home directory exists (Hybrid RAM storage)
     $username = $config['user'];
     $homePath = aicli_init_working_dir($username);
+    
+    // D-45: SQLite Pre-flight Check: Ensure agent databases are consistent after RAM restoration
+    aicli_pre_flight_check($agentId, $homePath, $workingDir);
 
     // Ensure standalone sync daemon is running for this user
     aicli_manage_sync_daemon($username);
@@ -1071,27 +1130,32 @@ function startAICliTerminal($id = 'default', $workingDir = null, $chatSessionId 
     if (!file_exists($refFile)) file_put_contents($refFile, "0");
 
     // Ensure binary is in RAM (Restore from USB cache if missing)
+    // The agent['binary'] path now points to the isolated agent directory
     $binExists = file_exists($agent['binary']);
-    // Fallback for gemini-cli old-style installs if NPM binary is missing
-    if ($agentId === 'gemini-cli' && !$binExists) {
-        $binExists = file_exists("$binDir/aicli.mjs");
-    }
     
     if (!$binExists) {
         aicli_log("Agent $agentId missing from RAM, attempting restore...", AICLI_LOG_WARN);
         $cacheFile = "/boot/config/plugins/unraid-aicliagents/pkg-cache/$agentId.tar.gz";
+        $agentInstallDir = "$agentBase/$agentId"; // The target directory for this agent
         if (file_exists($cacheFile)) {
             aicli_log("Found cached agent: $cacheFile. Restoring to RAM...", AICLI_LOG_INFO);
             // D-20: Use --no-same-owner for permission robustness on Unraid filesystems
-            exec("tar -xzf " . escapeshellarg($cacheFile) . " --no-same-owner -C " . escapeshellarg($binDir) . "/");
-        } elseif ($agentId === 'gemini-cli') {
-            // Legacy/Optimized single-file fallback for Gemini
-            $bootSource = "/boot/config/plugins/unraid-aicliagents/aicli.mjs";
-            if (file_exists($bootSource)) {
-                aicli_log("Restoring Gemini from legacy boot source", AICLI_LOG_INFO);
-                copy($bootSource, "$binDir/aicli.mjs");
-            }
+            // Ensure the target directory exists before extracting
+            if (!is_dir($agentInstallDir)) @mkdir($agentInstallDir, 0777, true);
+            exec("tar -xzf " . escapeshellarg($cacheFile) . " --no-same-owner -C " . escapeshellarg($agentInstallDir) . "/");
+            // D-47: Forced recursive permissions after restoration to ensure binaries are executable
+            exec("chmod -R 755 " . escapeshellarg($agentInstallDir));
+            aicli_log("Agent $agentId restored and permissions updated.", AICLI_LOG_INFO);
         }
+        // Legacy/Optimized single-file fallback for Gemini is no longer needed with isolated directories
+    }
+
+    // D-48: ABSOLUTELY MANDATORY: Always ensure the ENTIRE agent directory is executable.
+    // This is required because agents like OpenCode spawn internal sub-processes (e.g., .opencode) 
+    // that are not explicitly listed in our registry. Recursive chmod in RAM is fast and fixes EACCES.
+    $agentInstallDir = "$agentBase/$agentId";
+    if (is_dir($agentInstallDir)) {
+        exec("chmod -R 755 " . escapeshellarg($agentInstallDir) . " > /dev/null 2>&1");
     }
 
     // D-05: Removed duplicate getAICliConfig() call
@@ -1337,10 +1401,10 @@ function installAgent($agentId) {
     
     $bootConfig = "/boot/config/plugins/unraid-aicliagents";
     $cacheDir = "$bootConfig/pkg-cache";
-    $binDir = "/usr/local/emhttp/plugins/unraid-aicliagents/bin";
+    $agentBase = "/usr/local/emhttp/plugins/unraid-aicliagents/agents"; // New base for agent installations
     
     if (!is_dir($cacheDir)) mkdir($cacheDir, 0777, true);
-    if (!is_dir($binDir)) mkdir($binDir, 0777, true);
+    if (!is_dir($agentBase)) mkdir($agentBase, 0777, true); // Ensure agent base directory exists
 
     // 1. Prepare temporary RAM directory for installation/staging
     setInstallStatus("Preparing temporary RAM area...", 20, $agentId);
@@ -1379,11 +1443,21 @@ function installAgent($agentId) {
             $installPackage .= "@latest";
         }
 
-        setInstallStatus("Downloading & Installing $installPackage (NPM)...", 50, $agentId);
-        aicli_log("Running: npm install --prefix " . escapeshellarg($tmpDir) . " " . escapeshellarg($installPackage), AICLI_LOG_DEBUG);
+        // D-27: Clean up previous attempts to avoid 'File exists' errors
+        if (is_dir($tmpDir)) exec("rm -rf " . escapeshellarg($tmpDir));
+        mkdir($tmpDir, 0777, true);
+        
+        // D-24: Avoid manual package.json creation; let NPM handle it unless strictly needed.
+        // This resolves conflicts with scoped package linkage.
+
+        setInstallStatus("Downloading & Installing dependencies...", 50, $agentId);
+        $pluginDir = "/usr/local/emhttp/plugins/unraid-aicliagents";
+        aicli_log("Running: $pluginDir/bin/npm install --prefix " . escapeshellarg($tmpDir) . " " . escapeshellarg($installPackage), AICLI_LOG_DEBUG);
         $npmOutput = [];
-        exec("npm install --prefix " . escapeshellarg($tmpDir) . " " . escapeshellarg($installPackage) . " 2>&1", $npmOutput, $result);
-        aicli_log("NPM finished with code $result.", AICLI_LOG_DEBUG);
+        // D-22: Execute npm install with the explicit package name as the primary target
+        exec("export PATH=$pluginDir/bin:\$PATH; cd " . escapeshellarg($tmpDir) . " && $pluginDir/bin/npm install --prefix " . escapeshellarg($tmpDir) . " " . escapeshellarg($installPackage) . " 2>&1", $npmOutput, $result);
+        aicli_log("NPM finished with code $result. Output snapshot:\n" . implode("\n", array_slice($npmOutput, 0, 50)), AICLI_LOG_DEBUG);
+        aicli_log("NPM finished with code $result. Output snapshot:\n" . implode("\n", array_slice($npmOutput, 0, 50)), AICLI_LOG_DEBUG);
         
         if ($result !== 0) {
             aicli_log("ERROR: NPM install failed for $installPackage", AICLI_LOG_ERROR);
@@ -1409,38 +1483,60 @@ function installAgent($agentId) {
         return ['status' => 'error', 'error' => 'Caching to USB failed'];
     }
 
-    // 3. Move to active RAM bin directory
-    setInstallStatus("Deploying to active RAM environment...", 90, $agentId);
-    aicli_log("Cleaning up old version from RAM before deployment...", AICLI_LOG_DEBUG);
-    if ($agentId === 'gemini-cli') {
-        if (file_exists("$binDir/aicli.mjs")) {
-            unlink("$binDir/aicli.mjs");
-        }
+    // 3. Move to isolated RAM agent directory
+    setInstallStatus("Deploying to isolated RAM environment...", 90, $agentId);
+    $agentDir = "$agentBase/$agentId";
+    aicli_log("Cleaning up old version from RAM before deployment: $agentDir", AICLI_LOG_DEBUG);
+    if (is_dir($agentDir)) {
+        exec("rm -rf " . escapeshellarg($agentDir));
     }
-    
-    $npmMap = getAICliNpmMap();
-    $package = $npmMap[$agentId] ?? null;
-    if ($package) {
-        setInstallStatus("Cleaning up active package directory...", 92, $agentId);
-        $pkgDir = "$binDir/node_modules/" . str_replace('/', DIRECTORY_SEPARATOR, $package);
-        if (is_dir($pkgDir)) {
-            aicli_log("Removing existing package dir: $pkgDir", AICLI_LOG_DEBUG);
-            exec("rm -rf " . escapeshellarg($pkgDir));
-        }
-        
-        // Also clean up any potential legacy binary links in node_modules/.bin
-        $binName = basename($package);
-        $binLink = "$binDir/node_modules/.bin/$binName";
-        if (file_exists($binLink)) @unlink($binLink);
-    }
+    mkdir($agentDir, 0777, true);
 
-    setInstallStatus("Copying files to RAM bin...", 95, $agentId);
-    aicli_log("Copying installed files from $tmpDir to $binDir", AICLI_LOG_DEBUG);
-    exec("cp -r " . escapeshellarg($tmpDir) . "/* " . escapeshellarg($binDir) . "/ 2>&1", $cpOutput, $result);
+    setInstallStatus("Copying files to agent directory...", 95, $agentId);
+    
+    // D-26: TOTAL discovery in source before transfer (no filters)
+    $tmpDiscovery = [];
+    exec("find " . escapeshellarg($tmpDir) . " -maxdepth 4 2>&1", $tmpDiscovery);
+    aicli_log("Pre-copy discovery in tmpDir ($tmpDir):\n" . implode("\n", array_slice($tmpDiscovery, 0, 50)), AICLI_LOG_DEBUG);
+    
+    aicli_log("Deploying files from $tmpDir to $agentDir (using rsync)", AICLI_LOG_DEBUG);
+    // D-25: Back to rsync with -a and --info=name1 for granular feedback
+    $deployOutput = [];
+    exec("rsync -a " . escapeshellarg($tmpDir) . "/ " . escapeshellarg($agentDir) . "/ 2>&1", $deployOutput, $result);
     
     if ($result !== 0) {
-        aicli_log("ERROR: Failed to copy installed files from $tmpDir to $binDir. Output: " . implode(" ", $cpOutput), AICLI_LOG_ERROR);
-        return ['status' => 'error', 'error' => 'Deployment to RAM failed: ' . end($cpOutput)];
+        aicli_log("ERROR: Failed to deploy files using rsync. Result: $result. Output: " . implode(" ", $deployOutput), AICLI_LOG_ERROR);
+        return ['status' => 'error', 'error' => 'Deployment to RAM failed'];
+    }
+
+    // D-26: Force deep recursive permissions to ensure binaries and their targets are executable
+    exec("chmod -R 755 " . escapeshellarg($agentDir));
+    
+    // Explicitly target known binary links and their symlink targets
+    foreach ([$registry[$agentId]['binary'] ?? '', $registry[$agentId]['binary_fallback'] ?? ''] as $b) {
+        if (!empty($b)) {
+            exec("chmod +x " . escapeshellarg($b) . " > /dev/null 2>&1");
+            // If it's a symlink, chmod the real file too
+            exec("chmod +x $(readlink -f " . escapeshellarg($b) . ") > /dev/null 2>&1");
+        }
+    }
+
+    // D-25: Clear PHP's internal file status cache to ensure it sees the newly transferred files
+    clearstatcache(true, $agentDir);
+    
+    // VERIFICATION: Discovery after deploy (broad search)
+    $findOutput = [];
+    exec("find " . escapeshellarg($agentDir) . " -maxdepth 3 2>&1", $findOutput);
+    aicli_log("Post-deploy discovery in agentDir ($agentDir) [MaxDepth 3]:\n" . implode("\n", array_slice($findOutput, 0, 50)), AICLI_LOG_DEBUG);
+    
+    $binary = $registry[$agentId]['binary'] ?? '';
+    $fallback = $registry[$agentId]['binary_fallback'] ?? '';
+    $exists = (!empty($binary) && file_exists($binary)) || (!empty($fallback) && file_exists($fallback));
+    
+    if (!$exists) {
+        aicli_log("ERROR: Binary missing after deploy ($agentId) despite tar-pipe. Result code: $result", AICLI_LOG_ERROR);
+        setInstallStatus("Error: Binary missing after deploy. Check logs.", 0, $agentId);
+        return ['status' => 'error', 'error' => 'Binary verification failed'];
     }
     
     setInstallStatus("Finalizing...", 98, $agentId);
@@ -1455,12 +1551,13 @@ function installAgent($agentId) {
 } catch (Exception $e) {
     aicli_log("Installation failed: " . $e->getMessage(), AICLI_LOG_ERROR);
     @unlink("/tmp/unraid-aicliagents/install-$agentId.lock");
-    setInstallStatus("Error: " . $e->getMessage(), 0, $agentId);
     return ['status' => 'error', 'message' => $e->getMessage()];
 }
 }
 
 function uninstallAgent($agentId) {
+    if (empty($agentId)) return ['status' => 'error', 'message' => 'No Agent ID'];
+    
     $lockFile = "/tmp/unraid-aicliagents/install-$agentId.lock";
     if (file_exists($lockFile)) {
         $pid = trim(@file_get_contents($lockFile));
@@ -1472,59 +1569,41 @@ function uninstallAgent($agentId) {
     
     try {
         aicli_log("uninstallAgent started for $agentId", AICLI_LOG_INFO);
-    $bootConfig = "/boot/config/plugins/unraid-aicliagents";
-    $cacheDir = "$bootConfig/pkg-cache";
-    $binDir = "/usr/local/emhttp/plugins/unraid-aicliagents/bin";
-
-    // 1. Remove from RAM
-    if ($agentId === 'gemini-cli') {
-        if (file_exists("$binDir/aicli.mjs")) unlink("$binDir/aicli.mjs");
-    } else {
-        // D-07: Clean up NPM agent binaries from RAM
-        $npmMap = getAICliNpmMap();
-        $package = $npmMap[$agentId] ?? null;
-        if ($package) {
-            // Remove the specific package directory from node_modules
-            $pkgDir = "$binDir/node_modules/" . str_replace('/', DIRECTORY_SEPARATOR, $package);
-            if (is_dir($pkgDir)) {
-                exec("rm -rf " . escapeshellarg($pkgDir));
-                aicli_log("Removed NPM package dir: $pkgDir", AICLI_LOG_DEBUG);
-            }
-            // Remove the .bin symlink if it exists
-            $binName = basename($package);
-            $binLink = "$binDir/node_modules/.bin/$binName";
-            if (file_exists($binLink)) @unlink($binLink);
+        
+        // 1. Remove from RAM (Isolated Directory)
+        $agentDir = "/usr/local/emhttp/plugins/unraid-aicliagents/agents/$agentId";
+        if (is_dir($agentDir)) {
+            aicli_log("Removing agent RAM directory: $agentDir", AICLI_LOG_DEBUG);
+            exec("rm -rf " . escapeshellarg($agentDir));
         }
-    }
 
-    // 2. Remove USB cache
-    $cacheFile = "$cacheDir/$agentId.tar.gz";
-    if (file_exists($cacheFile)) {
-        aicli_log("Removing cache file: $cacheFile", AICLI_LOG_DEBUG);
-        unlink($cacheFile);
-    }
-    
-    // Legacy Gemini cleanup
-    if ($agentId === 'gemini-cli' && file_exists("$bootConfig/aicli.mjs")) {
-        unlink("$bootConfig/aicli.mjs");
-    }
+        // 2. Remove USB cache
+        $cacheDir = "/boot/config/plugins/unraid-aicliagents/pkg-cache";
+        $cacheFile = "$cacheDir/$agentId.tar.gz";
+        if (file_exists($cacheFile)) {
+            aicli_log("Removing cache file: $cacheFile", AICLI_LOG_DEBUG);
+            unlink($cacheFile);
+        }
+        
+        // 3. Remove version record
+        $versionsFile = "/boot/config/plugins/unraid-aicliagents/versions.json";
+        if (file_exists($versionsFile)) {
+            $versions = json_decode(file_get_contents($versionsFile), true);
+            if (isset($versions[$agentId])) {
+                unset($versions[$agentId]);
+                file_put_contents($versionsFile, json_encode($versions, JSON_PRETTY_PRINT));
+            }
+        }
 
-    // 3. Remove version record
-    $versions = getAICliVersions();
-    if (isset($versions[$agentId])) {
-        aicli_log("Removing version record for $agentId", AICLI_LOG_DEBUG);
-        unset($versions[$agentId]);
-        file_put_contents("/boot/config/plugins/unraid-aicliagents/versions.json", json_encode($versions, JSON_PRETTY_PRINT));
+        gcPkgCache();
+        aicli_log("Agent $agentId uninstalled successfully", AICLI_LOG_INFO);
+        @unlink($lockFile);
+        return ['status' => 'ok'];
+    } catch (Exception $e) {
+        aicli_log("Uninstall failed for $agentId: " . $e->getMessage(), AICLI_LOG_ERROR);
+        @unlink($lockFile);
+        return ['status' => 'error', 'message' => $e->getMessage()];
     }
-    
-    gcPkgCache();
-    @unlink("/tmp/unraid-aicliagents/install-$agentId.lock");
-    return ['status' => 'ok'];
-} catch (Exception $e) {
-    aicli_log("Uninstallation failed: " . $e->getMessage(), AICLI_LOG_ERROR);
-    @unlink("/tmp/unraid-aicliagents/install-$agentId.lock");
-    return ['status' => 'error', 'message' => $e->getMessage()];
-}
 }
 
 function aicli_versions_match($v1, $v2) {

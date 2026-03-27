@@ -1,8 +1,99 @@
 <?xml version='1.0' standalone='yes'?>
 
-<PLUGIN name="unraid-aicliagents" author="John White" version="2026.03.18.01" launch="Settings/AICliAgentsManager" pluginURL="https://raw.githubusercontent.com/johnpwhite/unraid-plg-aicliagents/main/unraid-aicliagents.plg" min="7.2.0" icon="unraid-aicliagents.png">
+<PLUGIN name="unraid-aicliagents" author="John White" version="2026.03.27.18" launch="Settings/AICliAgentsManager" pluginURL="https://raw.githubusercontent.com/443/unraid-plg-aicliagents/main/unraid-aicliagents.plg" min="7.2.0" icon="assets/icons/google-gemini.png">
 
 <CHANGES>
+## 2026.03.27.18
+- Fix: Stripped aggressive cleanup from SSH aliases
+- Aliases now only perform home-folder mapping to prevent interference with active WebUI terminal sessions.
+- Fix: Re-added surgical WAL deletion for OpenCode to resolve the persistent checkpoint loop with maximum stability.
+- Fix: Minimalist rollback of shell wrapper for stability testing
+- Stripped all complex environment and DB repair blocks to isolate the boot failure.
+- Fix: Used %q shell-quoting for all injected variables to prevent syntax corruption from complex paths or binary arguments.
+- Fix: Radical stabilization of shell environment propagation
+- Swapped double-expanding heredocs for atomic 'printf' and 'echo' injections to prevent all syntax corruption.
+- Fix: Implemented hybrid script generation and external environment sourcing to resolve shell syntax errors and terminal failures.
+- Fix: Stabilized shell wrapper generation by hardcoding EMHTTP_DEST and refining SQLite cleanup syntax to resolve 'reconnect' failure.
+- Fix: Implemented 'Sledgehammer' SQLite recovery
+- Forcefully kills zombies and clears stuck WAL/SHM files before every run to end the OpenCode checkpoint error loop.
+- Fix: Comprehensive permission &amp; DB repair update
+- Prevents installer from resetting executable bits and adds pre-flight fixes to SSH aliases.
+- Fix: Added shell-integration
+- sh to the installer manifest so aliases are correctly deployed and symlinked.
+- Fix: Injected terminal-side SQLite pre-flight check to resolve persistent OpenCode checkpoint failures during session reloads.
+- Feat: Advanced shell integration (global aliases) and integrated User &amp; Architecture Guide links in Settings and Terminal Drawer.
+- Fix: Mandatory recursive chmod for the entire agent directory on load to resolve internal EACCES errors for sub-processes (e
+- g.,
+- opencode).
+- Fix: Mandatory binary permission check before varje terminal start to resolve 'Permission denied' even when binaries already exist in RAM.
+- Fix: Resolve 'Permission denied' on agent binaries by forcing recursive 755 permissions after restoration from USB cache.
+- Feat: Implemented automatic SQLite pre-flight check to Repair/Checkpoint agent databases (OpenCode, Claude, etc.) on terminal load, ensuring consistent state after RAM restoration.
+- Fix: Resolve OpenCode SQLite checkpoint failures by enhancing 'Scorched Earth' process cleanup and ensuring WAL consistency during syncs.
+- Fix: Synced codebase and removed redundant/corrupt icon assets. - Cleanup: Standardized on google-gemini
+- png for all internal references (settings, drawer, etc).
+- Fix: Resolved Permission Denied for binaries.
+- Fix: Resolved 'Permission denied' errors by forcing executable bits on agent binaries and symlink targets
+- Fix: Reinforced recursive 755 permissions across the isolated agent environments
+- Fix: Fixed Gemini icon content and reverted to original filename (google-gemini
+- png).
+- Fix: Reverted Gemini icon to the original google-gemini.png filename for consistency
+- Fix: Overwrote corrupted icon with valid sparkle asset to resolve 'Not showing' issue
+- Internal: Updated UI build to use cache-busted icon URLs
+- Fix: Restored Gemini icon from valid src/ asset.
+- Fix: Restored Gemini icon by overwriting corrupted 404 placeholder with valid asset
+- Internal: Standardized agent icon paths for consistent WebUI appearance
+- Fix: Corrected Gemini binary name to gemini; Fix: OS disk sync; Fix: Broader discovery.
+- Fix: Corrected Gemini binary name from aicli to gemini (Resolved installation health check failure)
+- Fix: Implemented OS disk cache synchronization after agent deployment
+- Fix: Enhanced post-install discovery with broader filesystem scanning
+- Fix: Resolved PHP Fatal Error; Fix: Simplified isolated installation; Fix: Added exhaustive discovery logging.
+- Fix: Resolved PHP Fatal Error in logging engine (aicli_prune_log)
+- Fix: Simplified isolated installation to resolve scoped package linkage issues
+- Fix: Added exhaustive filesystem discovery to identify NPM output location
+- Fix: Switched to tar-pipe deployment; Fix: Added pre-deployment discovery logging.
+- Fix: Switched to high-fidelity tar-pipe deployment for isolated agents
+- Fix: Added pre-deployment discovery logging to verify NPM package contents
+- Fix: Resolved potential symlink breakage during agent RAM migration
+- Fix: Increased UI log limit; Fix: Added verbose deployment logging to identify missing binary source.
+- Fix: Increased UI log viewing limit to 250 lines (respecting new log_max_lines setting)
+- Fix: Switched to verbose cp -av for deployment to pinpoint file transfer failures
+- Fix: Added source tree logging before deployment to verify NPM output presence
+- Fix: Enforced log management; Fix: Resolved stale file status cache; Fix: Forced icon cache busting (gemini-v1
+- Fix: Enforced log management with user-configurable max size (default 50MB)
+- Fix: Resolved stale file status cache affecting binary verification
+- Fix: Forced icon cache busting with new asset naming (gemini-v1.png)
+- Fix: Reinforced agent discovery with binary path fallbacks; Fix: Enhanced installation logging; Fix: Improved icon path stability.
+- Fix: Reinforced agent discovery with binary path fallbacks
+- Fix: Enhanced installation logging with full NPM output capture
+- Fix: Improved icon path stability to resolve display issues
+- Fix: Definitive installation fix with environment isolation and clean workspace state; Fix: Resolved PHP mkdir() errors during background installations.
+- Fix: Definitive installation fix with environment isolation and clean workspace state
+- Fix: Resolved PHP mkdir() errors during background installations
+- Fix: Critical installation logic to force dependency linking into
+- bin; Fix: Added icon cache busting to force display of new Gemini assets; Fix: Reinforced background install environment with explicit PATH injection.
+- Fix: Critical installation logic to force dependency linking into .bin (Resolved 'Binary missing' error)
+- Fix: Added icon cache busting to force display of new Gemini assets
+- Fix: Reinforced background install environment with explicit PATH injection
+- Fix: Use rsync for agent deployment to ensure hidden files (
+- bin) and permissions are preserved; Fix: Reverted Gemini icon filename to google-gemini
+- png; Fix: Added binary existence verification to the installation process.
+- Fix: Definitive agent isolation restoration in storage
+- sh (Resolved dependency clobbering); Fix: Standardized Gemini icon filename to gemini-cli
+- png to match registry ID; Fix: Improved installer robustness by using absolute paths for node/npm inside backend jobs; Fix: Cleaned up legacy bin/node_modules correctly across all states
+- Fix: Renamed gemini icon to google-gemini
+- png to resolve display caching issues
+- Fix: Enhanced syntax balance and removed trailing whitespace to resolve Dynamix 'Unmatched }' error
+- Cleaned end-of-file delimiters
+- Verified PHP syntax is valid
+- Fix: Implemented Agent Isolation to prevent dependency clobbering
+- Refactored manager to use isolated runtime directories for each agent
+- Resolved ESM/CJS conflict in highlight
+- js/lowlight
+- Optimized RAM usage by cleaning up legacy shared node_modules
+- Feat: Added NanoCoder (@nanocollective/nanocoder) support
+- Feat: Added NANO_API_KEY to Secrets Vault
+- UI: Added NanoCoder icon
+
 ## 2026.03.18.01
 - Feat: Added Factory CLI (@factory/cli) support
 - Feat: Integrated 'droid' binary and Factory session management
@@ -45,22 +136,22 @@
 
 <!-- MANIFEST: Download Modular Scripts (Installer) -->
 <FILE Name="/tmp/aicli-clean.sh">
-<URL>https://raw.githubusercontent.com/johnpwhite/unraid-plg-aicliagents/main/src/scripts/installer/cleanup.sh</URL>
+<URL>https://raw.githubusercontent.com/443/unraid-plg-aicliagents/main/src/scripts/installer/cleanup.sh</URL>
 </FILE>
 <FILE Name="/tmp/aicli-legacy.sh">
-<URL>https://raw.githubusercontent.com/johnpwhite/unraid-plg-aicliagents/main/src/scripts/installer/legacy-migrate.sh</URL>
+<URL>https://raw.githubusercontent.com/443/unraid-plg-aicliagents/main/src/scripts/installer/legacy-migrate.sh</URL>
 </FILE>
 <FILE Name="/tmp/aicli-runtime.sh">
-<URL>https://raw.githubusercontent.com/johnpwhite/unraid-plg-aicliagents/main/src/scripts/installer/runtime.sh</URL>
+<URL>https://raw.githubusercontent.com/443/unraid-plg-aicliagents/main/src/scripts/installer/runtime.sh</URL>
 </FILE>
 <FILE Name="/tmp/aicli-ui.sh">
-<URL>https://raw.githubusercontent.com/johnpwhite/unraid-plg-aicliagents/main/src/scripts/installer/ui-assets.sh</URL>
+<URL>https://raw.githubusercontent.com/443/unraid-plg-aicliagents/main/src/scripts/installer/ui-assets.sh</URL>
 </FILE>
 <FILE Name="/tmp/aicli-storage.sh">
-<URL>https://raw.githubusercontent.com/johnpwhite/unraid-plg-aicliagents/main/src/scripts/installer/storage.sh</URL>
+<URL>https://raw.githubusercontent.com/443/unraid-plg-aicliagents/main/src/scripts/installer/storage.sh</URL>
 </FILE>
 <FILE Name="/tmp/aicli-finalize.sh">
-<URL>https://raw.githubusercontent.com/johnpwhite/unraid-plg-aicliagents/main/src/scripts/installer/finalize.sh</URL>
+<URL>https://raw.githubusercontent.com/443/unraid-plg-aicliagents/main/src/scripts/installer/finalize.sh</URL>
 </FILE>
 
 <!-- MAIN INSTALL ENGINE -->
@@ -69,8 +160,8 @@
 #!/bin/bash
 # AICliAgents Modular Installer Engine
 export NAME="unraid-aicliagents"
-export VERSION="2026.03.18.01"
-export GIT_URL="https://raw.githubusercontent.com/johnpwhite/unraid-plg-aicliagents/main"
+export VERSION="2026.03.27.18"
+export GIT_URL="https://raw.githubusercontent.com/443/unraid-plg-aicliagents/main"
 export EMHTTP_DEST="/usr/local/emhttp/plugins/unraid-aicliagents"
 export CONFIG_DIR="/boot/config/plugins/unraid-aicliagents"
 

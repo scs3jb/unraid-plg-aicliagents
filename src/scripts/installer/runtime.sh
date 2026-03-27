@@ -107,9 +107,15 @@ install_tool() {
 install_tool "$FD_TAR" "$FD_URL" "fd"
 install_tool "$RG_TAR" "$RG_URL" "rg"
 
-# 4. Create aicli wrapper
+# 4. Create aicli wrapper (Points to isolated Gemini CLI)
 cat << 'EOF' > /usr/local/bin/aicli
 #!/bin/bash
-"/usr/local/emhttp/plugins/unraid-aicliagents/bin/node" "/usr/local/emhttp/plugins/unraid-aicliagents/bin/node_modules/.bin/gemini" "$@"
+"/usr/local/emhttp/plugins/unraid-aicliagents/bin/node" "/usr/local/emhttp/plugins/unraid-aicliagents/agents/gemini-cli/node_modules/.bin/aicli" "$@"
 EOF
 chmod +x /usr/local/bin/aicli
+
+# 5. Legacy Cleanup (Reclaim RAM from old co-located node_modules)
+if [ -d "$EMHTTP_DEST/bin/node_modules" ]; then
+    status "Cleaning up legacy shared node_modules to reclaim RAM..."
+    rm -rf "$EMHTTP_DEST/bin/node_modules"
+fi

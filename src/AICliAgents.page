@@ -1,6 +1,6 @@
 Menu="Tasks"
 Title="AI CLI Agents"
-Icon="unraid-aicliagents.png"
+Icon="assets/icons/google-gemini.png"
 ---
 <?php
 require_once '/usr/local/emhttp/plugins/unraid-aicliagents/includes/AICliAgentsManager.php';

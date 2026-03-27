@@ -1,17 +1,20 @@
 #!/bin/bash
 # AICliAgents Installer: Storage & Persistence Migration
 
-# Restore Cached Agents to RAM
+# Restore Cached Agents to RAM (Isolated Environment)
+AGENT_BASE="$EMHTTP_DEST/agents"
+mkdir -p "$AGENT_BASE"
 CACHE_DIR="$CONFIG_DIR/pkg-cache"
-RAM_BIN="$EMHTTP_DEST/bin"
-mkdir -p "$RAM_BIN"
+
 if [ -d "$CACHE_DIR" ]; then
     status "Restoring cached agents to RAM..."
     shopt -s nullglob
     for pkg in "$CACHE_DIR"/*.tar.gz; do
         PKG_NAME=$(basename "$pkg" .tar.gz)
-        echo "  > Unpacking $PKG_NAME..."
-        tar -xzf "$pkg" -C "$RAM_BIN/" --no-same-owner || echo "    ! Failed to unpack $pkg"
+        AGENT_DIR="$AGENT_BASE/$PKG_NAME"
+        echo "  > Unpacking $PKG_NAME to isolated directory..."
+        mkdir -p "$AGENT_DIR"
+        tar -xzf "$pkg" -C "$AGENT_DIR/" --no-same-owner || echo "    ! Failed to unpack $pkg"
     done
     shopt -u nullglob
 fi

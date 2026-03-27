@@ -20,10 +20,11 @@ safe_kill "Periodic sync triggered"
 # 2. Kill all terminal listeners
 safe_kill "ttyd.*aicliterm-"
 
-# 3. Kill all active agent tmux sessions
+# 3. Kill all active agent tmux sessions & node binaries
 if command -v tmux >/dev/null 2>&1; then
     tmux ls -F '#S' 2>/dev/null | grep "^aicli-agent-" | xargs -r -I {} tmux kill-session -t "{}" > /dev/null 2>&1 || true
 fi
+safe_kill "node.*(gemini|opencode|nanocoder|claude|kilo|pi|codex|factory)"
 
 # 4. Clear runtime locks and temporary scripts
 rm -f /tmp/unraid-aicliagents/sync-daemon-*.sh

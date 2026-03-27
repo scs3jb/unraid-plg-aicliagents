@@ -1,6 +1,6 @@
 Menu="Utilities"
 Title="AI CLI Agents"
-Icon="unraid-aicliagents.png"
+Icon="assets/icons/google-gemini.png"
 ---
 <?php
 require_once '/usr/local/emhttp/plugins/unraid-aicliagents/includes/AICliAgentsManager.php';
@@ -437,6 +437,16 @@ $users = getUnraidUsers();
             </div>
             <div class="aicli-card-body" style="padding: 15px 20px;">
                 <div class="aicli-info-row">
+                    <div class="aicli-info-label">Help & Guide:</div>
+                    <div class="aicli-info-value">
+                        <a href="https://gitlab.johnpwhite.com/johner/unraid-plg-aicliagents/-/blob/master/docs/USER_GUIDE.md" target="_blank" style="color: #ff8c00; font-weight: bold; text-decoration: none;">
+                            <i class="fa fa-book"></i> VIEW ONLINE USER GUIDE
+                        </a>
+                    </div>
+                </div>
+                
+                <div class="aicli-info-row">
+
                     <div class="aicli-info-label">Config File:</div>
                     <div class="aicli-info-value"><code>/boot/config/plugins/unraid-aicliagents/unraid-aicliagents.cfg</code></div>
                 </div>
