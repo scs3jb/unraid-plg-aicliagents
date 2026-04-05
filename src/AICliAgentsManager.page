@@ -645,11 +645,14 @@ $users = getUnraidUsers();
                     <div class="aicli-info-value"><code id="display_ram_dir"><?= aicli_get_work_dir($config['user']) ?></code></div>
                 </div>
 
+                <?php
+                    $derivedHomePath = rtrim($config['persistence_base'] ?? '/mnt/user/appdata/aicliagents/persistence', '/') . '/' . ($config['user'] ?? 'root') . '/home';
+                ?>
                 <div class="aicli-info-row">
                     <div class="aicli-info-label">Home Backup Path:</div>
                     <div class="aicli-info-value">
-                        <code id="display_home_path"><?=$config['home_path']?></code>
-                        <input type="hidden" name="home_path" id="home_path" value="<?=$config['home_path']?>">
+                        <code id="display_home_path"><?=$derivedHomePath?></code>
+                        <input type="hidden" name="home_path" id="home_path" value="<?=$derivedHomePath?>">
                     </div>
                 </div>
                 

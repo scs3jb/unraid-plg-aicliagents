@@ -902,11 +902,9 @@ function saveAICliConfig($newConfig, $notify = true) {
     $oldUser = $oldConfig['user'] ?? 'root';
     $newUser = $current['user'] ?? 'root';
     
-    // D-41: Force home_path to the NEW user persistence folder if it's a standard path
-    $persistBase = $current['persistence_base'] ?? '/mnt/user/appdata/aicliagents/persistence';
-    if ($oldUser !== $newUser && (strpos($current['home_path'], "/boot/config/plugins/unraid-aicliagents/") === 0 || strpos($current['home_path'], $persistBase) === 0)) {
-        $current['home_path'] = "$persistBase/$newUser/home";
-    }
+    // D-180: Always derive home_path from persistence_base + user to keep in sync
+    $persistBase = rtrim($current['persistence_base'] ?? '/mnt/user/appdata/aicliagents/persistence', '/');
+    $current['home_path'] = "$persistBase/$newUser/home";
 
     // 3. User Transition: Sync old user's RAM to Flash before we change anything
     if ($oldUser !== $newUser) {
