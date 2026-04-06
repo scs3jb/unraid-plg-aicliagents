@@ -7,42 +7,51 @@ require_once '/usr/local/emhttp/plugins/unraid-aicliagents/includes/AICliAgentsM
 aicli_ensure_init();
 
 $config = getAICliConfig();
-// If disabled, just redirect or show message
 if ($config['enable_tab'] !== '1') {
     echo "AICliAgents CLI Tab is disabled in settings.";
     return;
 }
 
-// Get version for cache busting
-$version = "2026.04.02.39";
-
-// Get CSRF token
+$version = "2026.04.06.31";
 $var = @parse_ini_file("/var/local/emhttp/var.ini");
 $csrf_token = $var['csrf_token'] ?? '';
 ?>
 
+<style>
+html, body, #displaybox, #sb-body, #sb-container, .gemini-ui, main, #main-content, #aicliagents-root, .main-section, .main-row, #form {
+    overflow: hidden !important; overflow-y: hidden !important; overflow-x: hidden !important; overflow: clip !important;
+    scrollbar-width: none !important; -ms-overflow-style: none !important; scrollbar-gutter: none !important;
+    margin: 0 !important; padding: 0 !important; box-sizing: border-box !important; width: 100% !important; max-width: 100% !important; border: none !important;
+}
+body::-webkit-scrollbar, html::-webkit-scrollbar, #displaybox::-webkit-scrollbar, #sb-body::-webkit-scrollbar, .gemini-ui::-webkit-scrollbar, main::-webkit-scrollbar, #main-content::-webkit-scrollbar, #aicliagents-root::-webkit-scrollbar, .main-section::-webkit-scrollbar {
+    display: none !important; width: 0 !important; height: 0 !important;
+}
+div.title, .title, .title-row, .title-bar, .header-row { display: none !important; }
+#displaybox, #main-content { position: relative !important; left: 0 !important; right: 0 !important; }
+#aicliagents-root { width: 100% !important; display: flex; flex-direction: column; margin: 0 !important; padding: 0 !important; min-height: 400px; box-sizing: border-box !important; overflow: hidden !important; position: relative !important; }
+.gemini-ui { height: 100%; width: 100%; overflow: hidden !important; margin: 0 !important; padding: 0 !important; }
+</style>
+
 <div id="aicliagents-root"></div>
 
+<link rel="stylesheet" href="/plugins/unraid-aicliagents/assets/ui/index.css?v=<?= time() ?>">
+<script type="module" src="/plugins/unraid-aicliagents/assets/ui/index.js?v=<?= time() ?>"></script>
+
 <script>
+(function() {
     window.csrf_token = '<?=$csrf_token?>' || (typeof csrf_token !== 'undefined' ? csrf_token : '');
     window.aicli_version = '<?=$version?>';
 
-    // SERVER-AUTHORITATIVE WORKSPACE SYNC
-    (async function() {
-        // 1. INITIAL SYNC: Load from server before React initializes
+    async function syncWorkspaces() {
         try {
-            const resp = await fetch(`/plugins/unraid-aicliagents/AICliAjax.php?action=get_workspaces&csrf_token=${window.csrf_token}`);
+            const resp = await fetch('/plugins/unraid-aicliagents/AICliAjax.php?action=get_workspaces&csrf_token=' + encodeURIComponent(window.csrf_token));
             const data = await resp.json();
-            
-            // Migration Logic: If server is empty but local has data, push to server (one-time move)
-            const localSessString = localStorage.getItem('aicliagents_sessions');
-            const localSessions = localSessString ? JSON.parse(localSessString) : [];
+            const localSessions = JSON.parse(localStorage.getItem('aicliagents_sessions') || '[]');
             const localActiveId = localStorage.getItem('aicliagents_active_id');
             const serverSessions = (data && data.sessions) ? data.sessions : [];
 
             if (serverSessions.length === 0 && localSessions.length > 0) {
-                console.log("[AICli] Migrating local sessions to server-authoritative storage...");
-                fetch(`/plugins/unraid-aicliagents/AICliAjax.php?action=save_workspaces&csrf_token=${window.csrf_token}`, {
+                fetch('/plugins/unraid-aicliagents/AICliAjax.php?action=save_workspaces&csrf_token=' + encodeURIComponent(window.csrf_token), {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                     body: new URLSearchParams({
@@ -51,230 +60,74 @@ $csrf_token = $var['csrf_token'] ?? '';
                     })
                 });
             } else if (data && typeof data === 'object') {
-                // Server has data (or is explicitly empty after migration), use it
                 localStorage.setItem('aicliagents_sessions', JSON.stringify(serverSessions));
                 if (data.activeId !== undefined) localStorage.setItem('aicliagents_active_id', data.activeId);
-                console.log("[AICli] Workspace sessions synced from server. Count:", serverSessions.length);
             }
         } catch (e) {
-            console.warn("[AICli] could not sync sessions from server:", e);
+            console.warn("[AICli] sync failed:", e);
         }
-
-        // 2. PERSISTENCE PROXY: Hijack localStorage.setItem to push changes to server
-        const originalSetItem = localStorage.setItem;
-        localStorage.setItem = function(key, value) {
-            if (key === 'aicliagents_sessions' || key === 'aicliagents_active_id') {
-                const sessions = key === 'aicliagents_sessions' ? JSON.parse(value) : JSON.parse(localStorage.getItem('aicliagents_sessions') || '[]');
-                const activeId = key === 'aicliagents_active_id' ? value : localStorage.getItem('aicliagents_active_id');
-                
-                // Debounce/Push to server
-                clearTimeout(window._aicliSyncTimer);
-                window._aicliSyncTimer = setTimeout(() => {
-                    fetch(`/plugins/unraid-aicliagents/AICliAjax.php?action=save_workspaces&csrf_token=${window.csrf_token}`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                        body: new URLSearchParams({
-                            csrf_token: window.csrf_token,
-                            workspaces: JSON.stringify({ sessions, activeId })
-                        })
-                    }).catch(e => console.error("[AICli] Failed to save workspace to server:", e));
-                }, 500);
-            }
-            originalSetItem.apply(this, arguments);
-        };
-    })();
-</script>
-
-<link rel="stylesheet" href="/plugins/unraid-aicliagents/assets/ui/index.css?v=<?= $version ?>">
-<script type="module" src="/plugins/unraid-aicliagents/assets/ui/index.js?v=<?= $version ?>"></script>
-
-<style>
-/* 
-   Full scrollbar suppression. 
-   We force hidden on EVERY potential parent wrapper.
-*/
-/* 
-   Comprehensive reset for scrollbars and gutters.
-   We force hidden/clip on EVERYTHING that could reserve space.
-*/
-html,
-body, 
-#displaybox, 
-#sb-body, 
-#sb-container,
-.gemini-ui, 
-main, 
-#main-content,
-#aicliagents-root,
-.main-section,
-.main-row,
-#form {
-    overflow: hidden !important;
-    overflow-y: hidden !important;
-    overflow-x: hidden !important;
-    /* Use clip if supported to prevent any scroll-container behavior */
-    overflow: clip !important;
-    scrollbar-width: none !important;
-    -ms-overflow-style: none !important;
-    scrollbar-gutter: none !important;
-    margin: 0 !important;
-    padding: 0 !important;
-    box-sizing: border-box !important;
-    width: 100% !important;
-    max-width: 100% !important;
-    border: none !important;
-}
-
-body::-webkit-scrollbar,
-html::-webkit-scrollbar,
-#displaybox::-webkit-scrollbar,
-#sb-body::-webkit-scrollbar,
-.gemini-ui::-webkit-scrollbar,
-main::-webkit-scrollbar,
-#main-content::-webkit-scrollbar,
-#aicliagents-root::-webkit-scrollbar,
-.main-section::-webkit-scrollbar {
-    display: none !important;
-    width: 0 !important;
-    height: 0 !important;
-}
-
-/* HIDE THE PAGE HEADER */
-div.title, .title, .title-row, .title-bar, .header-row {
-    display: none !important;
-}
-
-#displaybox, #main-content {
-    position: relative !important;
-    left: 0 !important;
-    right: 0 !important;
-}
-
-#aicliagents-root {
-    width: 100% !important;
-    display: flex;
-    flex-direction: column;
-    margin: 0 !important;
-    padding: 0 !important; /* Total flush */
-    min-height: 400px;
-    box-sizing: border-box !important;
-    overflow: hidden !important;
-    position: relative !important;
-}
-
-.gemini-ui {
-    height: 100%;
-    width: 100%;
-    overflow: hidden !important;
-    margin: 0 !important;
-    padding: 0 !important;
-}
-</style>
-
-<script>
-$(function(){
-    var resizeTimer;
-    
-    // Force a resize event INSIDE the iframe so ttyd/xterm recalculates its fit
-    function triggerIframeResize() {
-        try {
-            var iframe = document.querySelector('iframe[title="AICli Terminal"]');
-            if (iframe && iframe.contentWindow) {
-                iframe.contentWindow.dispatchEvent(new Event('resize'));
-            }
-        } catch(e) {}
     }
 
-    // PERSISTENT OVERRIDE: Maintain scrollbar suppression and force container geometry.
+    const originalSetItem = localStorage.setItem;
+    localStorage.setItem = function(key, value) {
+        if (key === 'aicliagents_sessions' || key === 'aicliagents_active_id') {
+            const sessions = (key === 'aicliagents_sessions') ? JSON.parse(value) : JSON.parse(localStorage.getItem('aicliagents_sessions') || '[]');
+            const activeId = (key === 'aicliagents_active_id') ? value : localStorage.getItem('aicliagents_active_id');
+            clearTimeout(window._aicliSyncTimer);
+            window._aicliSyncTimer = setTimeout(function() {
+                fetch('/plugins/unraid-aicliagents/AICliAjax.php?action=save_workspaces&csrf_token=' + encodeURIComponent(window.csrf_token), {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: new URLSearchParams({
+                        csrf_token: window.csrf_token,
+                        workspaces: JSON.stringify({ sessions: sessions, activeId: activeId })
+                    })
+                }).catch(function(e) { console.error(e); });
+            }, 500);
+        }
+        originalSetItem.apply(this, arguments);
+    };
+
     function killScroll() {
-        var targets = 'html, body, #displaybox, #sb-body, #sb-container, #main-content, .main-section';
-        $(targets).css({
-            'overflow': 'hidden',
-            'overflow-y': 'hidden',
-            'scrollbar-gutter': 'none',
-            'width': '100%',
-            'max-width': '100%',
-            'margin': '0',
-            'padding': '0'
-        });
+        const targets = 'html, body, #displaybox, #sb-body, #sb-container, #main-content, .main-section';
+        $(targets).css({ 'overflow': 'hidden', 'overflow-y': 'hidden', 'scrollbar-gutter': 'none', 'width': '100%', 'max-width': '100%', 'margin': '0', 'padding': '0' });
         document.documentElement.style.setProperty('overflow', 'hidden', 'important');
         document.body.style.setProperty('overflow', 'hidden', 'important');
-        
-        // Ensure no right padding is inherited from Unraid themes
         $('#displaybox, #main-content').each(function() {
             this.style.setProperty('padding', '0', 'important');
             this.style.setProperty('margin', '0', 'important');
             this.style.setProperty('width', '100%', 'important');
         });
-
-        // Reach into the iframe to kill internal scrollbars (Same-Origin via Proxy)
-        try {
-            var iframe = document.querySelector('iframe[title="AICli Terminal"]');
-            if (iframe && iframe.contentDocument) {
-                var doc = iframe.contentDocument;
-                var styleId = 'aicli-kill-scroll';
-                if (!doc.getElementById(styleId)) {
-                    var style = doc.createElement('style');
-                    style.id = styleId;
-                    style.innerHTML = `
-                        html, body, .terminal, .xterm, .xterm-viewport, .xterm-screen { 
-                            overflow: hidden !important; 
-                            scrollbar-width: none !important; 
-                            padding: 0 !important; 
-                            margin: 0 !important;
-                            scrollbar-gutter: none !important;
-                            width: 100% !important;
-                            max-width: 100% !important;
-                        } 
-                        ::-webkit-scrollbar { display: none !important; width: 0 !important; height: 0 !important; }
-                    `;
-                    doc.head.appendChild(style);
-                }
-            }
-        } catch(e) {}
     }
 
-    // Dynamically size the root to fill from its top edge to the footer
+    let resizeTimer;
     function resizeRoot() {
         if (resizeTimer) cancelAnimationFrame(resizeTimer);
-        
         resizeTimer = requestAnimationFrame(function() {
-            var el = document.getElementById('aicliagents-root');
+            const el = document.getElementById('aicliagents-root');
             if (!el) return;
-            
-            // Re-calculate top position to account for any dynamically injected Unraid banners
-            var rect = el.getBoundingClientRect();
-            
-            // Try to find the Unraid footer
-            var footer = document.getElementById('footer');
-            var footerHeight = footer ? footer.offsetHeight : 24;
-            if (!footerHeight || footerHeight < 10) footerHeight = 24; // Fallback
-            
-            // 0px safety gap: React component now handles internal padding
-            var padding = 0;
-            var available = window.innerHeight - rect.top - footerHeight - padding;
-            
-            // Floor the height to avoid sub-pixel scaling causing 1px scrollbars
-            var finalHeight = Math.floor(available);
-            el.style.height = Math.max(400, finalHeight) + 'px';
-            
+            const rect = el.getBoundingClientRect();
+            const footer = document.getElementById('footer');
+            const footerHeight = (footer && footer.offsetHeight > 10) ? footer.offsetHeight : 24;
+            const available = window.innerHeight - rect.top - footerHeight;
+            el.style.height = Math.max(400, Math.floor(available)) + 'px';
             killScroll();
-            
-            // Force a resize event on the window to let the iframe know its container changed
             window.dispatchEvent(new Event('resize'));
-            setTimeout(triggerIframeResize, 10);
-            setTimeout(triggerIframeResize, 500);
+            // D-180: Broaden selector to ensure ALL terminals (including overlays) receive resize events
+            document.querySelectorAll('iframe').forEach(function(iframe) {
+                if (iframe.contentWindow) {
+                    try { iframe.contentWindow.dispatchEvent(new Event('resize')); } catch(e) {}
+                }
+            });
         });
     }
-    
-    // Run on load, on resize, and after React mounts
-    resizeRoot();
-    window.addEventListener('resize', resizeRoot);
-    
-    // D-13: Reduced from 7 timeouts — 3 is enough to catch Unraid UI shifts
-    [100, 500, 2000].forEach(ms => setTimeout(resizeRoot, ms));
-    // D-12: One-shot killScroll on load instead of wasteful 1-second interval
-    killScroll();
-});
-</script>
 
+    syncWorkspaces();
+    $(function() {
+        resizeRoot();
+        window.addEventListener('resize', resizeRoot);
+        [100, 500, 2000].forEach(function(ms) { setTimeout(resizeRoot, ms); });
+        killScroll();
+    });
+})();
+</script>

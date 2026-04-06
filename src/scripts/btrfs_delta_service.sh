@@ -30,30 +30,103 @@ case "$ACTION" in
         SIZE="${4:-128M}"
         [ -f "$TARGET_IMG" ] && exit 0
         status "Creating sparse Btrfs home image for $USER_NAME at $TARGET_IMG ($SIZE)..."
-        truncate -s "$SIZE" "$TARGET_IMG"
-        mkfs.btrfs -f "$TARGET_IMG" > /dev/null 2>&1
+        truncate -s "$SIZE" "$TARGET_IMG" || { error "Failed to create sparse file $TARGET_IMG"; exit 1; }
+        mkfs.btrfs -f "$TARGET_IMG" > /dev/null 2>&1 || { error "Failed to format Btrfs image $TARGET_IMG"; exit 1; }
         ;;
 
     "migrate")
         # Migrate a directory into a Btrfs image
         SRC_DIR="$3"
         DEST_IMG="$4"
-        [ ! -d "$SRC_DIR" ] && exit 1
-        [ -f "$DEST_IMG" ] && exit 0
+        [ ! -d "$SRC_DIR" ] && { error "Source directory $SRC_DIR does not exist"; exit 1; }
+        [ -f "$DEST_IMG" ] && { status "Target image $DEST_IMG already exists, skipping migration."; exit 0; }
         
-        status "Migrating $USER_NAME home folder into Btrfs image..."
-        # D-117: Safe 128MB ceiling for FAT32 compatibility (Flash stick storage)
-        truncate -s 128M "$DEST_IMG"
-        mkfs.btrfs -f "$DEST_IMG" > /dev/null 2>&1
+        # D-171: Dynamic Sizing - Detect source size and add 64MB buffer
+        SRC_SIZE_MB=$(du -sm "$SRC_DIR" | awk '{print $1}')
+        IMG_SIZE_MB=$((SRC_SIZE_MB + 64))
+        # D-117: FAT32 Safety Cap - Limit home images to 2GB on Flash
+        if [ "$IMG_SIZE_MB" -gt 2048 ]; then
+            status "WARN: Source data ($SRC_SIZE_MB MB) exceeds 2GB safety limit. Clamping image to 2GB."
+            IMG_SIZE_MB=2048
+        fi
+
+        # D-171: Safe Mount Hierarchy - Find a location with space that isn't the RAM disk
+        # Use mktemp -d to ensure zero clashing with existing user folders.
+        BASE_TMP=""
+        # 1. Try Appdata (Array/Cache)
+        if grep -q "mdState=STARTED" /var/local/emhttp/var.ini 2>/dev/null; then
+            APPDATA=$(grep "DOCKER_APP_DIR=" /boot/config/docker.cfg 2>/dev/null | cut -d'=' -f2 | tr -d '"')
+            [ -z "$APPDATA" ] && APPDATA="/mnt/user/appdata"
+            if [ -d "$APPDATA" ]; then
+                BASE_TMP="$APPDATA"
+            fi
+        fi
         
-        MNT="/tmp/aicli_mig_$USER_NAME"
-        mkdir -p "$MNT"
-        mount -o loop,compress-force=zstd:3 "$DEST_IMG" "$MNT"
-        # Apply standard excludes to prevent legacy garbage from entering the image
-        rsync -avcL $HOME_EXCLUDES "$SRC_DIR/" "$MNT/"
-        umount "$MNT"
+        # 2. Try Flash (Slow but safe fallback)
+        if [ -z "$BASE_TMP" ]; then
+            BASE_TMP="/boot/config/plugins/unraid-aicliagents"
+        fi
+
+        # Create the unique mount point
+        MNT=$(mktemp -d -p "$BASE_TMP" .aicli_mig_$USER_NAME.XXXXXX)
+        if [ $? -ne 0 ]; then
+            error "Failed to create temporary mount point in $BASE_TMP. Falling back to /tmp..."
+            MNT=$(mktemp -d -p "/tmp" .aicli_mig_$USER_NAME.XXXXXX)
+        fi
+
+        status "Selected unique migration mount point: $MNT"
+
+        # D-170: Ramdisk Protection - If we ended up in /tmp, perform strict space check
+        if [[ "$MNT" == /tmp/* ]]; then
+            TMP_FREE=$(df -m /tmp | tail -n 1 | awk '{print $4}')
+            if [ "$TMP_FREE" -lt 100 ]; then
+                error "Insufficient RAM disk space ($TMP_FREE MB free). Migration aborted."
+                rmdir "$MNT" 2>/dev/null
+                exit 1
+            fi
+        fi
+
+        status "Migrating $USER_NAME home ($SRC_SIZE_MB MB) into ${IMG_SIZE_MB}MB Btrfs image..."
+        truncate -s "${IMG_SIZE_MB}M" "$DEST_IMG" || { error "Failed to truncate $DEST_IMG"; exit 1; }
+        mkfs.btrfs -f "$DEST_IMG" > /dev/null 2>&1 || { error "Failed to format $DEST_IMG"; exit 1; }
+        
+        # THE GUARD: Strict mount verification
+        if ! mount -o loop,compress-force=zstd:3 "$DEST_IMG" "$MNT"; then
+            error "Failed to mount $DEST_IMG to $MNT. Migration failed."
+            rmdir "$MNT" 2>/dev/null
+            exit 1
+        fi
+
+        # Double-check mountpoint to be 100% sure we aren't writing to rootfs
+        if ! mountpoint -q "$MNT"; then
+            error "Mount command reported success but $MNT is not a mountpoint! Aborting to protect RAM."
+            rmdir "$MNT" 2>/dev/null
+            exit 1
+        fi
+
+        # Perform migration
+        if ! rsync -avcL $HOME_EXCLUDES "$SRC_DIR/" "$MNT/"; then
+            error "rsync failed during migration for $USER_NAME."
+            umount -l "$MNT"
+            rmdir "$MNT"
+            exit 1
+        fi
+
+        # VERIFICATION: Ensure file count matches or exceeds source (accounting for excludes)
+        SRC_COUNT=$(find "$SRC_DIR" -maxdepth 1 | wc -l)
+        DEST_COUNT=$(find "$MNT" -maxdepth 1 | wc -l)
+        status "Verification: Source items: $SRC_COUNT, Dest items: $DEST_COUNT"
+        
+        if [ "$DEST_COUNT" -lt 1 ] && [ "$SRC_COUNT" -gt 1 ]; then
+             error "Verification failed: Target image is empty but source had files. Migration aborted."
+             umount -l "$MNT"
+             rmdir "$MNT"
+             exit 1
+        fi
+
+        umount -l "$MNT"
         rmdir "$MNT"
-        status "Migration complete for $USER_NAME."
+        status "Migration complete and verified for $USER_NAME."
         ;;
 
     "mount_ram")
@@ -241,10 +314,17 @@ case "$ACTION" in
         # 1. Grow backfile
         truncate -s "+$SIZE_ADD" "$RAM_IMG"
         
-        # 2. Online resize
+        # 2. Refresh loop capacity (Kernel sync)
+        LOOP_DEV=$(losetup -j "$RAM_IMG" 2>/dev/null | cut -d: -f1 | head -n1)
+        if [ -n "$LOOP_DEV" ]; then
+            status "Refreshing loop device $LOOP_DEV capacity..."
+            losetup -c "$LOOP_DEV"
+        fi
+        
+        # 3. Online resize
         if mountpoint -q "$RAM_MNT"; then
-            status "Resizing $USER_NAME home filesystem..."
-            btrfs filesystem resize max "$RAM_MNT" > /dev/null 2>&1
+            status "Resizing $USER_NAME home filesystem on $RAM_MNT (to max)..."
+            btrfs filesystem resize max "$RAM_MNT"
         fi
         ;;
 

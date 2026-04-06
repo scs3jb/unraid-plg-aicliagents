@@ -38,7 +38,7 @@ if (!function_exists('command_exists')) {
  */
 function aicli_init_plugin() {
     // D-61: Versioned init sentinel ensures cleanup runs exactly once per upgrade
-    $version = "2026.04.03.24"; // Match current release
+    $version = "2026.04.06.42"; // Synchronized with release
     $doneFile = "/tmp/unraid-aicliagents/init_done_$version";
     if (file_exists($doneFile)) return;
 
@@ -48,9 +48,16 @@ function aicli_init_plugin() {
     $lock = "/tmp/unraid-aicliagents/init.lock";
     if (!is_dir('/tmp/unraid-aicliagents')) @mkdir('/tmp/unraid-aicliagents', 0777, true);
     $fp = fopen($lock, "w+");
-    if (!flock($fp, LOCK_EX | LOCK_NB)) {
+    if (!$fp || !flock($fp, LOCK_EX)) { // D-170: Block and wait for the first process to finish init
+        if ($fp) fclose($fp);
+        return; 
+    }
+
+    // D-170: Double-Check Locking - If init finished while we were waiting, exit now
+    if (file_exists($doneFile)) {
+        flock($fp, LOCK_UN);
         fclose($fp);
-        return; // Already being handled by another process
+        return;
     }
 
     @chmod('/tmp/unraid-aicliagents', 0777);
@@ -100,6 +107,35 @@ function aicli_init_plugin() {
     flock($fp, LOCK_UN);
     fclose($fp);
     @unlink($lock);
+}
+
+function aicli_boot_resurrection() {
+    aicli_log("STABILIZER: Boot-time Resurrection initiated...", AICLI_LOG_INFO);
+    
+    // 1. Ensure plugin is initialized (cleanups, directories, nginx)
+    aicli_init_plugin();
+    
+    // 2. Ensure Agent Storage is mounted
+    aicli_ensure_agent_storage_mounted();
+    
+    // 3. Identify and Restore User Home Images to RAM
+    $config = getAICliConfig();
+    $persistenceDir = "/boot/config/plugins/unraid-aicliagents/persistence";
+    if (is_dir($persistenceDir)) {
+        $homes = glob("$persistenceDir/home_*.img");
+        if (!empty($homes)) {
+            foreach ($homes as $hImg) {
+                $filename = basename($hImg);
+                $user = str_replace(['home_', '.img'], '', $filename);
+                if (empty($user)) continue;
+                
+                aicli_log("STABILIZER: Pre-loading Home for '$user' to RAM...", AICLI_LOG_INFO);
+                // D-170: This will mount the image to RAM and start the sync daemon
+                aicli_init_working_dir($user, true); 
+            }
+        }
+    }
+    aicli_log("STABILIZER: Boot-time Resurrection complete. System is Ready-Now.", AICLI_LOG_INFO);
 }
 
 function aicli_ensure_init() {
@@ -176,8 +212,88 @@ function aicli_ensure_agent_storage_mounted($forceRw = false) {
         return true;
     }
     
-    aicli_log("STABILIZER: Failed to mount agent storage: " . implode("\n", $output), AICLI_LOG_ERROR);
-    flock($fp, LOCK_UN); fclose($fp);
+    // D-170: If mount failed, attempt full repair sequence before giving up
+    aicli_log("STABILIZER: Initial mount failed ($result). Attempting storage repair sequence...", AICLI_LOG_WARN);
+    flock($fp, LOCK_UN); fclose($fp); // Release lock before repair to avoid blocking
+    
+    if (aicli_repair_agent_storage()) {
+        return aicli_ensure_agent_storage_mounted($forceRw);
+    }
+
+    return false;
+}
+
+/**
+ * Safely repairs a Btrfs loopback image by unstacking mounts, detaching loops,
+ * and performing a rescue sequence. 
+ * NOTE: This is NON-DESTRUCTIVE. It does NOT unlink the image.
+ */
+function aicli_repair_btrfs_image($imgFile, $mntPoint) {
+    if (!file_exists($imgFile)) return false;
+    
+    aicli_log("Btrfs Rescue: Processing $imgFile mounted at $mntPoint", AICLI_LOG_WARN);
+
+    // 1. Unstack all mount layers
+    while (trim((string)shell_exec("mountpoint -q " . escapeshellarg($mntPoint) . " && echo 1 || echo 0")) === '1') {
+        exec("umount -l " . escapeshellarg($mntPoint) . " > /dev/null 2>&1");
+    }
+
+    // 2. Clear loopback state
+    $loops = shell_exec("losetup -j " . escapeshellarg($imgFile) . " 2>/dev/null | cut -d: -f1");
+    if (!empty($loops)) {
+        foreach (explode("\n", trim($loops)) as $l) {
+            if (empty(trim($l))) continue;
+            exec("blockdev --setrw " . escapeshellarg($l) . " > /dev/null 2>&1");
+            exec("losetup -d " . escapeshellarg($l) . " > /dev/null 2>&1");
+        }
+    }
+    usleep(250000);
+
+    // 3. Offline Rescue
+    exec("btrfs rescue zero-log " . escapeshellarg($imgFile) . " > /dev/null 2>&1");
+    exec("btrfs rescue super-recover -y " . escapeshellarg($imgFile) . " > /dev/null 2>&1");
+    
+    // 4. Verification Mount (Try to force RW)
+    exec("mount -o loop,rw,noatime " . escapeshellarg($imgFile) . " " . escapeshellarg($mntPoint) . " 2>&1", $out, $res);
+    if ($res === 0) {
+        aicli_log("Btrfs Rescue: Success for $imgFile", AICLI_LOG_INFO);
+        // Force boundary sync
+        exec("btrfs filesystem resize max " . escapeshellarg($mntPoint) . " > /dev/null 2>&1");
+        exec("umount " . escapeshellarg($mntPoint) . " > /dev/null 2>&1");
+        return true;
+    }
+
+    aicli_log("Btrfs Rescue: FAILED for $imgFile. Image might be physically corrupted or locked by kernel. Output: " . implode("\n", $out), AICLI_LOG_ERROR);
+    return false;
+}
+
+function aicli_repair_agent_storage() {
+    $config = getAICliConfig();
+    $storageBase = $config['agent_storage_path'] ?? "/boot/config/plugins/unraid-aicliagents";
+    $imgFile = "$storageBase/aicli-agents.img";
+    $agentBase = "/usr/local/emhttp/plugins/unraid-aicliagents/agents";
+
+    if (aicli_repair_btrfs_image($imgFile, $agentBase)) {
+        $res = aicli_ensure_agent_storage_mounted(true); // Mount RW to verify rescue
+        if ($res) aicli_agent_storage_lock(); // Force return to RO protection
+        return $res;
+    }
+    return false;
+}
+
+function aicli_repair_home_storage($username) {
+    if (empty($username)) return false;
+    $workDir = "/tmp/unraid-aicliagents/work";
+    $imgFile = "$workDir/home_$username.img";
+    $mntPoint = "$workDir/$username/home";
+
+    if (aicli_repair_btrfs_image($imgFile, $mntPoint)) {
+        // Remount home logic
+        aicli_log("Home Rescue: Remounting $username home...", AICLI_LOG_INFO);
+        $serviceScript = dirname(__DIR__) . "/scripts/btrfs_delta_service.sh";
+        exec("bash " . escapeshellarg($serviceScript) . " mount_ram " . escapeshellarg($username), $out, $res);
+        return ($res === 0);
+    }
     return false;
 }
 
@@ -186,7 +302,17 @@ function aicli_ensure_agent_storage_mounted($forceRw = false) {
  */
 function aicli_agent_storage_unlock() {
     $agentBase = "/usr/local/emhttp/plugins/unraid-aicliagents/agents";
-    if (!aicli_is_agent_storage_ro()) return true;
+    $isRo = aicli_is_agent_storage_ro();
+    
+    if (!$isRo) {
+        // Double check it's actually mounted
+        if (trim((string)shell_exec("mountpoint -q " . escapeshellarg($agentBase) . " && echo 1 || echo 0")) !== '1') {
+            aicli_log("MAINTENANCE: Unlocking Agent storage (Mounting fresh RW)", AICLI_LOG_INFO);
+            return aicli_ensure_agent_storage_mounted(true);
+        }
+        aicli_log("MAINTENANCE: Agent storage is already RW.", AICLI_LOG_DEBUG);
+        return true; 
+    }
     
     aicli_log("MAINTENANCE: Unlocking Agent storage (RO -> RW)", AICLI_LOG_INFO);
     
@@ -196,8 +322,6 @@ function aicli_agent_storage_unlock() {
         usleep(300000); // 300ms
         
         // D-168: Robust Write-Protection Clearing
-        // If the mount is backed by a loop device, force the block device to RW state
-        // before attempting the filesystem remount.
         $loop = trim((string)shell_exec("findmnt -n -o SOURCE " . escapeshellarg($agentBase)));
         if (!empty($loop) && strpos($loop, '/dev/loop') === 0) {
              exec("blockdev --setrw " . escapeshellarg($loop) . " > /dev/null 2>&1");
@@ -208,75 +332,15 @@ function aicli_agent_storage_unlock() {
         
         aicli_log("Mnt Attempt $i failed: " . implode(" ", $out), AICLI_LOG_WARN);
         unset($out);
-        usleep(500000); // Wait 0.5s before retry
+        usleep(500000);
     }
     
-    // D-165: Hard Recovery - If remount,rw failed, try a full unmount/mount cycle
-    // This is required to clear "state EMA" (error is not allowed) kernel flags.
-    aicli_log("STALL: Remount RW failed. Attempting Full Cycle (Umount/Mount) to clear error state...", AICLI_LOG_WARN);
-    exec("umount -l " . escapeshellarg($agentBase) . " > /dev/null 2>&1");
-    
-    // Canonical image path resolution
-    $config = getAICliConfig();
-    $storageBase = $config['agent_storage_path'] ?? "/boot/config/plugins/unraid-aicliagents";
-    $imgFile = "$storageBase/aicli-agents.img";
-    
-    // Force loop detachment to clear stale kernel state
-    for ($loop = trim(shell_exec("losetup -j " . escapeshellarg($imgFile) . " 2>/dev/null | cut -d: -f1")); $loop; $loop = false) {
-        foreach (explode("\n", $loop) as $l) {
-            $l = trim($l);
-            if (empty($l)) continue;
-            aicli_log("STALL: Detaching busy loop device $l...", AICLI_LOG_WARN);
-            // D-168: Force block device to RW before detachment just in case
-            exec("blockdev --setrw " . escapeshellarg($l) . " > /dev/null 2>&1");
-            exec("losetup -d " . escapeshellarg($l) . " > /dev/null 2>&1");
-        }
-    }
-    usleep(1000000); // 1s sync
-    
-    if (file_exists($imgFile)) {
-        aicli_log("MAINTENANCE: Performing offline filesystem repair on agent storage...", AICLI_LOG_WARN);
-        
-        // Comprehensive Btrfs Rescue Sequence
-        exec("btrfs rescue zero-log " . escapeshellarg($imgFile) . " > /dev/null 2>&1");
-        exec("btrfs rescue super-recover -y " . escapeshellarg($imgFile) . " > /dev/null 2>&1");
-        exec("btrfs check --repair " . escapeshellarg($imgFile) . " 2>&1", $repairOut);
-        
-        aicli_log("Repair Output: " . implode(" | ", array_slice($repairOut, -5)), AICLI_LOG_INFO);
-        usleep(1000000); 
+    // D-165: Hard Recovery
+    aicli_log("STALL: Remount RW failed. Triggering robust repair sequence...", AICLI_LOG_WARN);
+    if (aicli_repair_agent_storage()) {
+        return aicli_ensure_agent_storage_mounted(true);
     }
     
-    aicli_ensure_agent_storage_mounted(true); 
-    
-    if (!aicli_is_agent_storage_ro()) {
-        aicli_log("RECOVERY: Full cycle and Repair succeeded. Storage is now RW.", AICLI_LOG_INFO);
-        return true;
-    }
-    
-    aicli_log("CRITICAL: Agent binary storage is unrecoverable (I/O errors). Recreating fresh volume...", AICLI_LOG_ERROR);
-    exec("umount -l " . escapeshellarg($agentBase) . " > /dev/null 2>&1");
-    // Force loop detachment
-    foreach (explode("\n", trim(shell_exec("losetup -j " . escapeshellarg($imgFile) . " 2>/dev/null | cut -d: -f1"))) as $l) {
-        $l = trim($l);
-        if (!empty($l)) {
-            exec("blockdev --setrw " . escapeshellarg($l) . " > /dev/null 2>&1");
-            exec("losetup -d " . escapeshellarg($l) . " > /dev/null 2>&1");
-        }
-    }
-    
-    @chmod($imgFile, 0666);
-    @unlink($imgFile);
-    usleep(1000000);
-    aicli_ensure_agent_storage_mounted(true); // Force RW on brand new image
-    
-    if (!aicli_is_agent_storage_ro() || file_exists($imgFile)) {
-        aicli_log("RESTORED: Corrupted agent image has been replaced with a fresh volume (RW).", AICLI_LOG_INFO);
-        return true;
-    }
-    
-    // Final fail - capture dmesg for debugging
-    exec("dmesg | tail -n 25", $dmesg);
-    aicli_log("FATAL: Complete storage failure. Flash drive may be failing. Dmesg: " . implode(" | ", $dmesg), AICLI_LOG_ERROR);
     return false;
 }
 
@@ -288,18 +352,65 @@ function aicli_agent_storage_lock() {
     if (aicli_is_agent_storage_ro()) return true;
 
     aicli_log("MAINTENANCE: Locking Agent storage (RW -> RO)", AICLI_LOG_INFO);
-    exec("sync " . escapeshellarg($agentBase));
-    exec("mount -o remount,ro " . escapeshellarg($agentBase) . " 2>&1", $out, $res);
-    return ($res === 0);
+    
+    // D-168: Robust locking loop with retries for busy filesystems
+    for ($i = 1; $i <= 5; $i++) {
+        exec("sync " . escapeshellarg($agentBase));
+        usleep(500000); // 500ms
+        
+        exec("mount -o remount,ro " . escapeshellarg($agentBase) . " 2>&1", $out, $res);
+        if ($res === 0) return true;
+        
+        $outStr = implode(" ", $out);
+        aicli_log("Lock Attempt $i failed: $outStr", AICLI_LOG_WARN);
+        
+        if (strpos($outStr, "busy") !== false) {
+             // D-196: Diagnostic Logging - See what's holding the mount
+             if (command_exists('lsof')) {
+                 $lsof = shell_exec("lsof +D " . escapeshellarg($agentBase) . " 2>/dev/null");
+                 if (!empty($lsof)) aicli_log("Processes holding mount busy:\n$lsof", AICLI_LOG_DEBUG);
+             }
+
+             // D-169: If busy, aggressively kill lingering processes
+             if ($i >= 2) {
+                  aicli_log("Surgical cleanup: Killing ALL processes using $agentBase (Attempt $i)...", AICLI_LOG_WARN);
+                  exec("fuser -kvm " . escapeshellarg($agentBase) . " > /dev/null 2>&1");
+                  usleep(800000);
+             }
+        }
+        
+        unset($out);
+        usleep(500000);
+    }
+    
+    return false;
 }
 
 function aicli_is_agent_storage_ro() {
     $agentBase = "/usr/local/emhttp/plugins/unraid-aicliagents/agents";
-    $mounts = file_exists('/proc/mounts') ? file_get_contents('/proc/mounts') : '';
+    
+    // 1. Check /proc/mounts (Metadata Reality)
+    $mounts = file_exists('/proc/mounts') ? @file_get_contents('/proc/mounts') : '';
+    $isRoMetadata = false;
     if (preg_match('|' . preg_quote($agentBase) . '[ \t]+btrfs[ \t]+([^ \t\n\r]+)|', $mounts, $matches)) {
         $options = explode(',', $matches[1]);
-        return in_array('ro', $options);
+        if (in_array('ro', $options)) $isRoMetadata = true;
+    } else {
+        // If not in mounts at all
+        return true; 
     }
+
+    if ($isRoMetadata) return true;
+
+    // 2. 'Physical Reality' Check: Try to touch a file to see if the kernel actually allows writes
+    // (Btrfs sometimes stays RO in the kernel state even if metadata says RW after a panic)
+    $testFile = "$agentBase/.aicli_rw_test";
+    @unlink($testFile);
+    if (!@touch($testFile)) {
+        return true; // Cannot write, effectively RO
+    }
+    @unlink($testFile);
+    
     return false;
 }
 
@@ -460,10 +571,6 @@ function aicli_notify($message, $subject = "System Notification", $type = 'norma
 /**
  * Hybrid Storage Helpers
  */
-function aicli_get_work_dir($username) {
-    return "/tmp/unraid-aicliagents/work/$username/home";
-}
-
 function aicli_get_persist_dir($username) {
     $config = getAICliConfig();
     $base = !empty($config['persistence_base']) ? rtrim($config['persistence_base'], '/') : "/boot/config/plugins/unraid-aicliagents/persistence";
@@ -511,12 +618,37 @@ function aicli_is_path_ready($path) {
     return is_dir("/mnt/$mountPoint");
 }
 
+function aicli_get_work_dir($username) {
+    $base = "/tmp/unraid-aicliagents/work/$username";
+    if (!is_dir($base)) {
+        @mkdir($base, 0775, true);
+        @chown($base, 'aicliagent');
+        @chgrp($base, 'users');
+        
+        // D-170: Cap RAM usage for work directory to prevent system rootfs exhaustion.
+        // We mount a dedicated tmpfs for the user work dir with a 128MB limit.
+        // This ensures a runaway agent doesn't consume all system RAM.
+        exec("mount -t tmpfs -o size=128M tmpfs " . escapeshellarg($base) . " > /dev/null 2>&1");
+    }
+    return $base;
+}
+
 function aicli_init_working_dir($username, $forceRestore = false) {
     if (empty($username)) $username = 'root';
+    $userDir = aicli_get_work_dir($username);
     $workBase = "/tmp/unraid-aicliagents/work";
-    $userDir = "$workBase/$username";
     $ramImg = "$workBase/home_$username.img";
     $ramDir = "$userDir/home";
+
+    // D-170: Session Initialization Lock per User
+    // Prevents concurrent requests from mounting or restoring the same image
+    $initLock = "/tmp/unraid-aicliagents/init_$username.lock";
+    if (!is_dir(dirname($initLock))) @mkdir(dirname($initLock), 0777, true);
+    $fpLock = fopen($initLock, "w+");
+    if (!$fpLock || !flock($fpLock, LOCK_EX)) {
+        if ($fpLock) fclose($fpLock);
+        return false;
+    }
     
     // 1. Ensure basics
     if (!is_dir($workBase)) {
@@ -545,17 +677,17 @@ function aicli_init_working_dir($username, $forceRestore = false) {
     if ($isReady && !file_exists($persistImg)) {
         // Migration logic: If legacy directory exists, create image and migrate
         if (is_dir($persistBase) && count(array_diff(scandir($persistBase), ['.', '..'])) > 0) {
-            aicli_log("MIGRATING: Creating Btrfs home image from legacy directory for $username...", AICLI_LOG_INFO);
-            exec("$serviceScript init " . escapeshellarg($username) . " " . escapeshellarg($persistImg));
+            aicli_log("MIGRATING: Creating verified Btrfs home image from legacy directory for $username...", AICLI_LOG_INFO);
+            // D-171: Call the consolidated shell script for migration and verification
+            exec("$serviceScript migrate " . escapeshellarg($username) . " " . escapeshellarg($persistBase) . " " . escapeshellarg($persistImg), $output, $returnCode);
             
-            // Temporary mount to migrate data
-            $tempMnt = "/tmp/aicli_migrate_$$";
-            @mkdir($tempMnt, 0700, true);
-            exec("mount -o loop " . escapeshellarg($persistImg) . " " . escapeshellarg($tempMnt));
-            exec("rsync -avcL " . escapeshellarg($persistBase . "/") . " " . escapeshellarg($tempMnt . "/"));
-            exec("umount " . escapeshellarg($tempMnt));
-            @rmdir($tempMnt);
-            aicli_log("Migration successful for $username.", AICLI_LOG_INFO);
+            if ($returnCode === 0 && file_exists($persistImg)) {
+                aicli_log("Migration successful and verified for $username. Cleaning up legacy directory.", AICLI_LOG_INFO);
+                // D-171: Only remove if verification passed
+                exec("rm -rf " . escapeshellarg($persistBase));
+            } else {
+                aicli_log("ERROR: Migration failed or verification failed for $username. Check logs.", AICLI_LOG_ERROR);
+            }
         } else {
             // New user: Create fresh 128MB image (Standardized Increment)
             exec("$serviceScript init " . escapeshellarg($username) . " " . escapeshellarg($persistImg) . " 128M");
@@ -570,7 +702,8 @@ function aicli_init_working_dir($username, $forceRestore = false) {
         if (!file_exists($ramImg) || $forceRestore) {
             if ($isReady && file_exists($persistImg)) {
                 aicli_log("Restoring Home Image from Persistence to RAM for $username...", AICLI_LOG_INFO);
-                exec("cp " . escapeshellarg($persistImg) . " " . escapeshellarg($ramImg));
+                // D-170: Atomic Restoration - Copy to temp file first then rename to prevent partial-file mounts
+                exec("cp " . escapeshellarg($persistImg) . " " . escapeshellarg($ramImg . ".tmp") . " && mv " . escapeshellarg($ramImg . ".tmp") . " " . escapeshellarg($ramImg));
                 if (file_exists($volatileFlag)) @unlink($volatileFlag);
             } else if (!$isReady) {
                 aicli_log("WARN: Persistence path NOT READY ($persistImg). Creating VOLATILE RAM image.", AICLI_LOG_WARN);
@@ -599,6 +732,14 @@ function aicli_init_working_dir($username, $forceRestore = false) {
             aicli_log("Mounting Btrfs Home (Direct Persistent) for $username...", AICLI_LOG_INFO);
             exec("mount -o loop,compress-force=zstd:3,noatime " . escapeshellarg($targetImgToMount) . " " . escapeshellarg($ramDir));
         }
+        
+        // D-170: Verify mount succeeded
+        if (!aicli_is_mounted($ramDir)) {
+            aicli_log("ERROR: Failed to mount Home storage for $username.", AICLI_LOG_ERROR);
+            flock($fpLock, LOCK_UN);
+            fclose($fpLock);
+            return false;
+        }
     }
 
     // 5. Ownership Fixes
@@ -606,6 +747,9 @@ function aicli_init_working_dir($username, $forceRestore = false) {
         exec("chown -R " . escapeshellarg($username) . ":users " . escapeshellarg($userDir));
         exec("chown -R " . escapeshellarg($username) . ":users " . escapeshellarg($ramDir));
     }
+
+    flock($fpLock, LOCK_UN);
+    fclose($fpLock);
 
     return $ramDir;
 }
@@ -1362,7 +1506,11 @@ function getAICliAgentIdFile($id = 'default') {
     return "/var/run/unraid-aicliagents-$id.agentid";
 }
 
-function isAICliRunning($id = 'default', $chatId = null, $agentId = null) {
+function getAICliWorkingDirFile($id = 'default') {
+    return "/var/run/unraid-aicliagents-$id.workdir";
+}
+
+function isAICliRunning($id = 'default', $chatId = null, $agentId = null, $path = null) {
     $id = preg_replace('/[^a-zA-Z0-9_-]/', '', $id);
     $sock = getAICliSock($id);
     if (!file_exists($sock)) return false;
@@ -1381,6 +1529,14 @@ function isAICliRunning($id = 'default', $chatId = null, $agentId = null) {
         if (!file_exists($chatIdFile)) return false;
         $runningChatId = trim(file_get_contents($chatIdFile));
         if ($chatId !== $runningChatId) return false;
+    }
+
+    // Verify Path if requested
+    if ($path !== null) {
+        $workDirFile = getAICliWorkingDirFile($id);
+        if (!file_exists($workDirFile)) return false;
+        $runningPath = trim(file_get_contents($workDirFile));
+        if ($path !== $runningPath) return false;
     }
 
     return true;
@@ -1603,10 +1759,38 @@ function getAICliAgentsRegistry() {
     }
 
     // MANDATORY: Recalculate is_installed for all agents to ensure the UI reflects reality
+    $versions = getAICliVersions();
+    $versionsChanged = false;
+
     foreach ($registry as $id => &$agent) {
         $bin = $agent['binary'] ?? '';
         $fallback = $agent['binary_fallback'] ?? '';
-        $agent['is_installed'] = (!empty($bin) && file_exists($bin)) || (!empty($fallback) && file_exists($fallback));
+        
+        // D-199: Strict Verification - Must have a version record AND a physical binary
+        $hasVersion = isset($versions[$id]) && $versions[$id] !== '0.0.0' && $versions[$id] !== 'unknown';
+        $binExists = (!empty($bin) && file_exists($bin)) || (!empty($fallback) && file_exists($fallback));
+        
+        $agent['is_installed'] = ($hasVersion && $binExists);
+
+        // D-170: Lazy-populate versions.json if missing but agent is installed
+        if ($binExists && !$hasVersion) {
+            $pJson = dirname($bin) . "/../package.json";
+            if (!file_exists($pJson)) $pJson = dirname($fallback) . "/../package.json";
+            
+            if (file_exists($pJson)) {
+                $pData = json_decode(@file_get_contents($pJson), true);
+                if (isset($pData['version'])) {
+                    $versions[$id] = $pData['version'];
+                    $versionsChanged = true;
+                    aicli_log("Lazy-restored version for $id: " . $pData['version'], AICLI_LOG_INFO);
+                }
+            }
+        }
+    }
+
+    if ($versionsChanged) {
+        $vFile = "/boot/config/plugins/unraid-aicliagents/versions.json";
+        file_put_contents($vFile, json_encode($versions, JSON_PRETTY_PRINT));
     }
 
     return $registry;
@@ -1670,13 +1854,13 @@ function saveWorkspaceEnvs($path, $agentId, $envs) {
     file_put_contents($file, json_encode($data, JSON_PRETTY_PRINT));
 }
 
-function startAICliTerminal($id = 'default', $workingDir = null, $chatSessionId = null, $agentId = 'gemini-cli') {
+function startAICliTerminal($id = 'default', $path = null, $chatSessionId = null, $agentId = 'gemini-cli') {
     // D-01/D-02: Sanitize inputs to prevent command injection
     $id = preg_replace('/[^a-zA-Z0-9_-]/', '', $id);
     $agentId = preg_replace('/[^a-zA-Z0-9_-]/', '', $agentId);
     if ($chatSessionId !== null) $chatSessionId = preg_replace('/[^a-zA-Z0-9_-]/', '', $chatSessionId);
 
-    aicli_log("startAICliTerminal called: ID=$id, Agent=$agentId, Path=$workingDir", AICLI_LOG_INFO);
+    aicli_log("startAICliTerminal called: ID=$id, Agent=$agentId, Path=$path", AICLI_LOG_INFO);
     $sock = getAICliSock($id);
     $shell = "/usr/local/emhttp/plugins/unraid-aicliagents/scripts/aicli-shell.sh";
     $logDir = "/tmp/unraid-aicliagents";
@@ -1692,7 +1876,23 @@ function startAICliTerminal($id = 'default', $workingDir = null, $chatSessionId 
     $agentBase = "/usr/local/emhttp/plugins/unraid-aicliagents/agents"; // New base for agent installations
 
     $registry = getAICliAgentsRegistry();
-    $agent = $registry[$agentId] ?? $registry['gemini-cli'];
+    
+    // D-195: Hardcoded support for 'terminal' pseudo-agent (Feature, not a selectable Agent)
+    if ($agentId === 'terminal') {
+        $agent = [
+            'id' => 'terminal',
+            'name' => 'Terminal',
+            'icon_url' => '/plugins/unraid-aicliagents/assets/icons/terminal.png',
+            'runtime' => 'shell',
+            'binary' => '/bin/bash',
+            'resume_cmd' => '/bin/bash',
+            'resume_latest' => '/bin/bash',
+            'env_prefix' => 'TERM',
+            'is_installed' => true
+        ];
+    } else {
+        $agent = $registry[$agentId] ?? $registry['gemini-cli'];
+    }
 
     if (!$agent['is_installed']) {
         aicli_log("ERROR: Agent $agentId is not installed.", AICLI_LOG_ERROR);
@@ -1709,11 +1909,12 @@ function startAICliTerminal($id = 'default', $workingDir = null, $chatSessionId 
     }
 
     $config = getAICliConfig();
-    $workingDir = $workingDir ?: $config['root_path'];
+    $workingDir = $path ?: $config['root_path'];
 
     // Ensure Home directory exists (Hybrid RAM storage)
     $username = $config['user'];
     $homePath = aicli_init_working_dir($username);
+    if (!$homePath) return; // D-170: Wait for lock or error logged elsewhere
 
     // D-99: STORAGE AUTO-OPTIMIZATION: Relocated here to run once per sync cycle (instead of every 5s status check)
     // D-101: LOCKING: Wrapped in /usr/bin/flock -n to ensure only ONE defrag runs per image at a time.
@@ -1768,7 +1969,11 @@ function startAICliTerminal($id = 'default', $workingDir = null, $chatSessionId 
     if (!file_exists($refFile)) file_put_contents($refFile, "0");
 
     // D-121: Agent Storage is now authoritative from the Btrfs mount. 
-    // If it's missing, 'aicli_ensure_agent_storage_mounted' should have caught it during init.
+    if (!aicli_ensure_agent_storage_mounted()) {
+        aicli_log("CRITICAL: Agent storage could not be mounted in startAICliTerminal.", AICLI_LOG_ERROR);
+        return;
+    }
+
     $binExists = file_exists($agent['binary']);
     if (!$binExists) {
         $msg = "CRITICAL: Agent binary not found at {$agent['binary']}. Agent Storage mount might be failed or incomplete.";
@@ -1806,7 +2011,7 @@ function startAICliTerminal($id = 'default', $workingDir = null, $chatSessionId 
         }
     }
 
-    if (isAICliRunning($id, $chatSessionId, $agentId) && file_exists($sock)) {
+    if (isAICliRunning($id, $chatSessionId, $agentId, $workingDir) && file_exists($sock)) {
         flock($fp, LOCK_UN);
         fclose($fp);
         return;
@@ -1814,10 +2019,12 @@ function startAICliTerminal($id = 'default', $workingDir = null, $chatSessionId 
 
     // D-35: Even if heartbeat is missing, we don't forcefully restart terminal sessions here.
     // The daemon will be restarted lazily via aicli_manage_sync_daemon($username) above if needed.
-    // However, if the sesson exists but the AGENT has changed, we MUST kill and restart.
+    // However, if the sesson exists but the AGENT or PATH has changed, we MUST kill and restart.
     $runningAgentId = file_exists($agentIdFile) ? trim(file_get_contents($agentIdFile)) : '';
-    if ($runningAgentId !== '' && $runningAgentId !== $agentId) {
-        aicli_log("Agent ID changed ($runningAgentId -> $agentId). Forcing session restart.", AICLI_LOG_INFO);
+    $runningPath = file_exists(getAICliWorkingDirFile($id)) ? trim(file_get_contents(getAICliWorkingDirFile($id))) : '';
+    
+    if (($runningAgentId !== '' && $runningAgentId !== $agentId) || ($runningPath !== '' && $runningPath !== $workingDir)) {
+        aicli_log("Session context changed (Agent: $runningAgentId->$agentId, Path: $runningPath->$workingDir). Forcing session restart.", AICLI_LOG_INFO);
         stopAICliTerminal($id, true);
     }
 
@@ -1826,6 +2033,7 @@ function startAICliTerminal($id = 'default', $workingDir = null, $chatSessionId 
     // Save state before starting
     if ($chatSessionId !== null) file_put_contents($chatIdFile, $chatSessionId);
     file_put_contents($agentIdFile, $agentId);
+    file_put_contents(getAICliWorkingDirFile($id), $workingDir);
 
     // D-02: Escape all env values to prevent shell injection
     // D-25: Export the RAM working dir as AICLI_HOME to ensure write access and performance
@@ -1909,29 +2117,79 @@ function startAICliTerminal($id = 'default', $workingDir = null, $chatSessionId 
     if (!is_dir("$cacheDir/tmp")) @mkdir("$cacheDir/tmp", 0777, true);
 
     $themeStr = getAICliTtydTheme($config['theme'] ?? 'dark');
+    // D-180: Use system ttyd with robust path detection
+    $ttyd = "/usr/sbin/ttyd";
+    if (!file_exists($ttyd)) $ttyd = "/usr/bin/ttyd";
+    if (!file_exists($ttyd)) $ttyd = "ttyd";
+
+    // D-186: Cleanup stale socket and PID to prevent 502/Bind failures
+    if (file_exists($sock)) @unlink($sock);
+    if (file_exists($pidFile)) @unlink($pidFile);
+
+    $log = "/tmp/unraid-aicliagents/ttyd-$id.log";
+    @unlink($log);
+
+    // Build the environment string as KEY=VAL for 'env' (no 'export' or ';')
+    $envArr = [
+        "AICLI_HOME" => $homePath,
+        "AICLI_USER" => $config['user'],
+        "AICLI_ROOT" => $workingDir,
+        "AICLI_HISTORY" => $config['history'],
+        "AICLI_SESSION_ID" => $id,
+        "AICLI_DEBUG" => $logLevel,
+        "AICLI_SYNC_MINS" => (string)$syncMins,
+        "AGENT_ID" => $agentId,
+        "AGENT_NAME" => $agent['name'],
+        "ENV_PREFIX" => $agent['env_prefix'],
+        "BINARY" => $agent['binary'],
+        "RESUME_CMD" => $agent['resume_cmd'],
+        "RESUME_LATEST" => $agent['resume_latest'],
+        "COLORTERM" => "truecolor",
+        "NODE_OPTIONS" => "--max-old-space-size=$memLimit",
+        "OPENCODE_EXPERIMENTAL_DISABLE_COPY_ON_SELECT" => "true",
+        "NPM_CONFIG_CACHE" => "$cacheDir/npm",
+        "XDG_CACHE_HOME" => "$cacheDir/xdg",
+        "TMPDIR" => "$cacheDir/tmp"
+    ];
+    if (!empty($chatSessionId)) $envArr["AICLI_CHAT_SESSION_ID"] = $chatSessionId;
     
-    $cmd = "ttyd -i $safeSock -W -d0 " .
+    // Merge workspace-specific envs
+    $customEnvs = getWorkspaceEnvs($workingDir, $agentId);
+    foreach ($customEnvs as $k => $v) $envArr[preg_replace('/[^a-zA-Z0-9_-]/', '', $k)] = $v;
+
+    $envStr = "";
+    foreach ($envArr as $k => $v) $envStr .= escapeshellarg("$k=$v") . " ";
+
+    // D-190: Unraid 7.2 ttyd uses -i for Unix Sockets (NOT -U)
+    // We run runuser to drop privileges to the target user.
+    $cmd = "$ttyd -i $safeSock -p 0 -W -d0 " .
            "-t fontSize=$safeFontSize " .
            "-t fontFamily='monospace' " .
            "-t theme='$themeStr' " .
-           "-t termName=xterm-256color " .
-           "-t copyOnSelection=true " .
-           "-t disableLeaveAlert=true " .
-           "-t enable-utf8=true " .
-           "-t allowProposedApi=true " .
-           "-t terminalType=xterm-256color " .
-           "-t 'terminalOverrides=xterm-256color:Ms=\\E]52;c;%p2%s\\7' " .
-           "-t titleFixed=" . escapeshellarg($agent['name'] . " - $id") . " " .
-           "runuser -s /bin/bash " . $safeUser . " -c " . escapeshellarg("$env $shell");
+           "runuser -u " . $safeUser . " -- env $envStr /bin/bash " . escapeshellarg($shell);
     
-    exec("nohup $cmd >> " . escapeshellarg($log) . " 2>&1 & echo $!", $output);
-    @chmod($log, 0666);
+    aicli_log("Launching ttyd for session $id: $cmd", AICLI_LOG_DEBUG);
+    
+    exec("nohup $cmd > " . escapeshellarg($log) . " 2>&1 & echo $!", $output, $execRes);
+
     $pid = trim($output[0] ?? '');
     if ($pid && ctype_digit($pid)) {
         file_put_contents($pidFile, $pid);
-        // D-30: Give ttyd a moment to bind the Unix socket before returning to frontend.
-        // This prevents the Nginx proxy from returning 502 Bad Gateway on first load.
-        usleep(800000); 
+        // D-30: Robust wait loop for socket availability and PERMISSIONS
+        for ($i = 0; $i < 10; $i++) {
+            if (file_exists($sock)) {
+                // IMPORTANT: Nginx (nobody) needs access to the socket
+                @chmod($sock, 0666);
+                aicli_log("Terminal socket created and permissions fixed for $id.", AICLI_LOG_DEBUG);
+                break;
+            }
+            usleep(200000); 
+        }
+        if (!file_exists($sock)) {
+            aicli_log("ERROR: Terminal socket failed to appear after 2s for $id. Check $log", AICLI_LOG_ERROR);
+        }
+    } else {
+        aicli_log("ERROR: Failed to start ttyd process for $id. Exec result: $execRes", AICLI_LOG_ERROR);
     }
     
     flock($fp, LOCK_UN);
@@ -2108,11 +2366,9 @@ function aicli_get_storage_status() {
                 }
                 $hVirtualUsed = $hU;
                 
-                // D-136: Scale Alignment - If Btrfs size < File size (stale shrink), auto-reclaim Flash space
-                if ($hTotal < ($hTotalFile = round(filesize($hImg) / 1024 / 1024))) {
-                     aicli_log("STABILIZER: Reclaiming " . ($hTotalFile - $hTotal) . "MB of dead air from $hImg", AICLI_LOG_INFO);
-                     exec("truncate -s " . escapeshellarg($hTotal . "M") . " " . escapeshellarg($hImg));
-                }
+                // D-136: Scale Alignment - Re-calculate logically used space
+                // D-198: Disabled auto-truncation due to risk of data loss on failed mounts.
+                // Manual 'Shrink' should be used instead.
 
                 // D-133: Accurately calculate Physical usage for the UI Bar
                 $hCompData = aicli_get_btrfs_compression_info($hMnt, $hVirtualUsed);
@@ -2195,59 +2451,80 @@ function aicli_expand_storage($type = 'agents', $sizeAdd = '256M') {
         return ['status' => 'error', 'message' => 'Resize operation already in progress.'];
     }
 
-    if ($type === 'agents') {
-        $img = "/boot/config/plugins/unraid-aicliagents/aicli-agents.img";
-        $mnt = "/usr/local/emhttp/plugins/unraid-aicliagents/agents";
-        $headroom = aicli_get_flash_headroom();
-        if ($headroom < 150) return ['status' => 'error', 'message' => 'Flash too full to expand image safely. Free up 150MB+ on Flash first.'];
-        
-        aicli_log("Expanding Agent storage binary container ($img) by $sizeAdd...", AICLI_LOG_INFO);
-        aicli_agent_storage_unlock();
-        exec("truncate -s +$sizeAdd " . escapeshellarg($img) . " 2>&1", $out, $res);
-        if ($res !== 0) {
-            aicli_agent_storage_lock();
-            return ['status' => 'error', 'message' => 'Truncate failed: ' . end($out)];
-        }
-        
-        if (is_dir($mnt)) {
-            exec("btrfs filesystem resize max " . escapeshellarg($mnt) . " 2>&1", $out, $res);
+    try {
+        if ($type === 'agents') {
+            $img = "/boot/config/plugins/unraid-aicliagents/aicli-agents.img";
+            $config = getAICliConfig();
+            $realImg = rtrim($config['agent_storage_path'] ?? "/boot/config/plugins/unraid-aicliagents", '/') . "/aicli-agents.img";
+            if (file_exists($realImg)) $img = $realImg;
+
+            $mnt = "/usr/local/emhttp/plugins/unraid-aicliagents/agents";
+            
+            if (strpos($img, "/boot/") === 0) {
+                $headroom = aicli_get_flash_headroom();
+                if ($headroom < 150) return ['status' => 'error', 'message' => 'Flash too full to expand image safely. Free up 150MB+ on Flash first.'];
+            }
+            
+            aicli_log("Expanding Agent storage binary container ($img) by $sizeAdd...", AICLI_LOG_INFO);
+            aicli_agent_storage_unlock();
+            
+            exec("truncate -s +$sizeAdd " . escapeshellarg($img) . " 2>&1", $out, $res);
             if ($res !== 0) {
-                aicli_agent_storage_lock();
-                return ['status' => 'error', 'message' => 'Btrfs resize failed: ' . end($out)];
+                return ['status' => 'error', 'message' => 'Truncate failed: ' . end($out)];
+            }
+            
+            $loop = trim((string)shell_exec("findmnt -n -o SOURCE " . escapeshellarg($mnt)));
+            if (!empty($loop) && strpos($loop, '/dev/loop') === 0) {
+                aicli_log("Refreshing loop device $loop size...", AICLI_LOG_DEBUG);
+                exec("losetup -c " . escapeshellarg($loop) . " 2>&1");
+            }
+            
+            if (is_dir($mnt)) {
+                aicli_log("Performing Btrfs filesystem resize (max)...", AICLI_LOG_DEBUG);
+                exec("btrfs filesystem resize max " . escapeshellarg($mnt) . " 2>&1", $out, $res);
+                if ($res !== 0) {
+                    $sizeMb = intval(preg_replace('/[^0-9]/', '', $sizeAdd));
+                    aicli_log("Btrfs max resize failed, trying targeted +{$sizeMb}M resize...", AICLI_LOG_WARN);
+                    exec("btrfs filesystem resize +{$sizeMb}M " . escapeshellarg($mnt) . " 2>&1", $out2, $res2);
+                    if ($res2 !== 0) {
+                        return ['status' => 'error', 'message' => 'Btrfs resize failed: ' . end($out2)];
+                    }
+                }
+            }
+            aicli_log("Agent storage expansion complete.", AICLI_LOG_INFO);
+            
+            $throttleFile = "/boot/config/plugins/unraid-aicliagents/storage_warn_sent.txt";
+            if (file_exists($throttleFile)) @unlink($throttleFile);
+
+        } else {
+            // Expand user home image
+            $user = str_replace('home_', '', $type); // D-170: Strip prefix to get clean username
+            $serviceScript = dirname(__DIR__) . "/scripts/btrfs_delta_service.sh";
+            aicli_log("Expanding Home storage container for $user by $sizeAdd...", AICLI_LOG_INFO);
+            exec("bash " . escapeshellarg($serviceScript) . " expand " . escapeshellarg($user) . " " . escapeshellarg($sizeAdd), $out, $res);
+            if ($res === 0) {
+                 foreach ($out as $line) if (!empty(trim($line))) aicli_log("  > " . $line, AICLI_LOG_DEBUG);
+                 $throttleUser = "/boot/config/plugins/unraid-aicliagents/warn_sent_$type.txt";
+                 if (file_exists($throttleUser)) @unlink($throttleUser);
+            } else {
+                aicli_log("Home expansion FAILED for $user. Output: " . implode("\n", $out), AICLI_LOG_ERROR);
+                return ['status' => 'error', 'message' => implode("\n", $out)];
             }
         }
-        aicli_agent_storage_lock();
-        
-        // D-81: Reset notification throttle flag after manual expansion
-        $throttleFile = "/boot/config/plugins/unraid-aicliagents/storage_warn_sent.txt";
-        if (file_exists($throttleFile)) @unlink($throttleFile);
-
-    } else {
-        // Expand user home image
-        $serviceScript = dirname(__DIR__) . "/scripts/btrfs_delta_service.sh";
-        exec("bash " . escapeshellarg($serviceScript) . " expand " . escapeshellarg($type) . " " . escapeshellarg($sizeAdd), $out, $res);
-        if ($res === 0) {
-             $throttleUser = "/boot/config/plugins/unraid-aicliagents/warn_sent_$type.txt";
-             if (file_exists($throttleUser)) @unlink($throttleUser);
-        } else {
-            flock($fp, LOCK_UN);
-            fclose($fp);
-            @unlink($lockFile);
-            return ['status' => 'error', 'message' => implode("\n", $out)];
-        }
+        return ['status' => 'ok'];
+    } finally {
+        if ($type === 'agents') aicli_agent_storage_lock();
+        flock($fp, LOCK_UN);
+        fclose($fp);
+        @unlink($lockFile);
     }
-
-    flock($fp, LOCK_UN);
-    fclose($fp);
-    @unlink($lockFile);
-    return ['status' => 'ok'];
 }
 
 /**
  * Shrinks a Btrfs image safely. 
  * $type can be 'agents' or a username for 'home' storage.
  */
-function aicli_shrink_storage($type = 'agents', $sizeSub = '256M') {
+function aicli_shrink_storage($type = 'agents', $sizeSub = 'auto') {
     $lockFile = "/tmp/unraid-aicliagents/resize.lock";
     $fp = fopen($lockFile, "w+");
     if (!flock($fp, LOCK_EX | LOCK_NB)) {
@@ -2256,114 +2533,95 @@ function aicli_shrink_storage($type = 'agents', $sizeSub = '256M') {
         return ['status' => 'error', 'message' => 'Resize operation already in progress.'];
     }
 
-    if ($type === 'agents') {
-        $img = "/boot/config/plugins/unraid-aicliagents/aicli-agents.img";
-        $mnt = "/usr/local/emhttp/plugins/unraid-aicliagents/agents";
-        
-        aicli_log("Shrinking agent storage container by $sizeSub...", AICLI_LOG_INFO);
+    try {
+        if (strpos($type, 'home_') === 0) {
+            $user = str_replace('home_', '', $type);
+            $workDir = "/tmp/unraid-aicliagents/work";
+            $img = "$workDir/home_$user.img";
+            $mnt = "$workDir/$user/home";
+            $minSize = 512; // D-170: Increased to 512MB for Btrfs stability on RAM disks
+        } else {
+            $img = "/boot/config/plugins/unraid-aicliagents/aicli-agents.img";
+            // D-188: Detect real image location
+            $config = getAICliConfig();
+            $realImg = rtrim($config['agent_storage_path'] ?? "/boot/config/plugins/unraid-aicliagents", '/') . "/aicli-agents.img";
+            if (file_exists($realImg)) $img = $realImg;
+            $mnt = "/usr/local/emhttp/plugins/unraid-aicliagents/agents";
+            $minSize = 512; // D-170: Increased to 512MB for Btrfs stability
+        }
+
+        if (!file_exists($img)) {
+            return ['status' => 'error', 'message' => 'Image file not found.'];
+        }
+
+        aicli_log("Evaluating shrink for $type...", AICLI_LOG_INFO);
         if (is_dir($mnt)) {
-            if (!aicli_agent_storage_unlock()) {
-                aicli_log("Shrink aborted: Failed to unlock agent storage (RO -> RW)", AICLI_LOG_ERROR);
-                flock($fp, LOCK_UN); fclose($fp); @unlink($lockFile);
-                return ['status' => 'error', 'message' => 'Failed to unlock storage for write access. Check if files are open.'];
+            if ($type === 'agents') {
+                if (!aicli_agent_storage_unlock()) {
+                    aicli_log("Shrink aborted: Failed to unlock agent storage (RO -> RW)", AICLI_LOG_ERROR);
+                    return ['status' => 'error', 'message' => 'Failed to unlock storage for write access.'];
+                }
             }
 
-            // D-135: Intelligent Floor-Aware Shrink (Min 256MB for Btrfs stability)
             $df_stats = shell_exec("df -m --output=size " . escapeshellarg($mnt) . " | tail -1");
             $currMb = intval(trim($df_stats ?? '0'));
-            $subMb = intval(preg_replace('/[^0-9]/', '', $sizeSub));
             
-            if (($currMb - $subMb) < 256) {
-                $subMb = $currMb - 256;
-                if ($subMb <= 0) {
-                    aicli_agent_storage_lock();
-                    flock($fp, LOCK_UN); fclose($fp); @unlink($lockFile);
-                    return ['status' => 'error', 'message' => 'Filesystem is already at the minimum safe size (256MB).'];
-                }
-                $sizeSub = "{$subMb}M";
-                aicli_log("Clamping agent shrink to floor (256MB). Real reduction: $sizeSub", AICLI_LOG_INFO);
-            }
-
-            // D-151: Physical-Aware Buffered Shrink Guards (Logical + 128MB Buffer)
             $storageStats = aicli_get_storage_status();
-            $logicalUsed = $storageStats['logical_used_mb'] ?? 0;
-            $targetMb = $currMb - $subMb;
+            $logicalUsed = 0;
+            if ($type === 'agents') {
+                $logicalUsed = $storageStats['logical_used_mb'] ?? 0;
+            } else {
+                $user = str_replace('home_', '', $type);
+                $logicalUsed = $storageStats['home_stats'][$user]['logical_used_mb'] ?? 0;
+            }
+
+            // Calculate Target: Logical Used + 256MB Headroom (Clamped to minSize)
+            $targetMb = max($minSize, ceil($logicalUsed + 256));
             
-            if ($targetMb < ($logicalUsed + 128)) {
-                $safeSub = $currMb - ($logicalUsed + 128);
-                if ($safeSub < 0) $safeSub = 0;
-                if ($safeSub < $subMb) {
-                    aicli_log("Clamping shrink to prevent I/O Error. Target {$targetMb}MB is too close to LOGICAL usage {$logicalUsed}MB. Safe Reduction: {$safeSub}MB", AICLI_LOG_WARN);
-                    $subMb = intval($safeSub);
-                    $sizeSub = "{$subMb}M";
-                    $targetMb = $currMb - $subMb;
-                }
+            if ($sizeSub !== 'auto') {
+                $reqSubMb = intval(preg_replace('/[^0-9]/', '', $sizeSub));
+                $requestedTarget = $currMb - $reqSubMb;
+                $targetMb = max($targetMb, $requestedTarget);
             }
 
-            if ($subMb <= 0) {
-                aicli_log("Shrink blocked: Target size would be smaller than logical data ({$logicalUsed}MB + 128MB buffer).", AICLI_LOG_WARN);
-                aicli_agent_storage_lock();
-                flock($fp, LOCK_UN); fclose($fp); @unlink($lockFile);
-                return ['status' => 'error', 'message' => "Filesystem cannot be shrunk further. While Physical Usage is low, the LOGICAL data ({$logicalUsed}MB) plus safety buffer (128MB) exceeds the target size."];
+            $subMb = $currMb - $targetMb;
+
+            if ($subMb <= 10) { 
+                return ['status' => 'error', 'message' => "Storage is already optimized. Minimum safe size is approximately {$targetMb}MB (Contents + 128MB buffer)."];
             }
 
-            // D-163: AGGRESSIVE SHRINK STABILIZER
-            // Btrfs often refuses to shrink if extents or metadata are located at the end of the device.
-            // We MUST perform a full data/metadata balance to evacuate the tail blocks before resizing.
-            aicli_log("STABILIZER: Evacuating blocks from device tail (Aggressive Balance)...", AICLI_LOG_INFO);
+            aicli_log("Shrinking $type: Current {$currMb}MB -> Target {$targetMb}MB (Reduction: {$subMb}MB)", AICLI_LOG_INFO);
+            
+            aicli_log("STABILIZER: Aggressively balancing and defragmenting $type...", AICLI_LOG_DEBUG);
             exec("btrfs filesystem defragment -r -czstd " . escapeshellarg($mnt) . " > /dev/null 2>&1");
-            // Balance everything less than 100% full (effectively a full balance for these small images)
-            exec("btrfs balance start -dusage=100 -musage=100 " . escapeshellarg($mnt) . " > /dev/null 2>&1");
+            // Standard balance to free up empty chunks before resize
+            exec("btrfs balance start -dusage=75 -musage=75 " . escapeshellarg($mnt) . " > /dev/null 2>&1");
+            // Full metadata balance to ensure all blocks are packed
+            exec("btrfs balance start -m " . escapeshellarg($mnt) . " > /dev/null 2>&1");
 
-            // 1. Resize live filesystem down
-            exec("btrfs filesystem resize -{$subMb}M " . escapeshellarg($mnt) . " 2>&1", $out, $res);
+            aicli_log("Resizing Btrfs filesystem to {$targetMb}M...", AICLI_LOG_INFO);
+            exec("btrfs filesystem resize {$targetMb}M " . escapeshellarg($mnt) . " 2>&1", $out, $res);
             if ($res !== 0) {
-                aicli_log("Btrfs shrink failed: " . implode("\n", $out), AICLI_LOG_ERROR);
-                aicli_agent_storage_lock();
-                flock($fp, LOCK_UN); fclose($fp); @unlink($lockFile);
-                return ['status' => 'error', 'message' => 'Filesystem shrink failed. Tail blocks could not be moved: ' . end($out)];
+                return ['status' => 'error', 'message' => 'Btrfs resize failed: ' . end($out)];
             }
-            // 2. Truncate backfile to EXACT new size
-            exec("truncate -s " . escapeshellarg($targetMb . "M") . " " . escapeshellarg($img));
-            aicli_agent_storage_lock();
+
+            $loop = trim((string)shell_exec("findmnt -n -o SOURCE " . escapeshellarg($mnt)));
+            if (!empty($loop) && strpos($loop, '/dev/loop') === 0) {
+                exec("truncate -s {$targetMb}M " . escapeshellarg($img) . " 2>&1", $out, $res);
+                exec("losetup -c " . escapeshellarg($loop) . " 2>&1");
+            }
+
+            aicli_log("Shrink of $type complete.", AICLI_LOG_INFO);
+            return ['status' => 'ok', 'message' => 'Storage shrunk successfully.'];
         } else {
-             return ['status' => 'error', 'message' => 'Agents filesystem is not mounted, cannot shrink safely.'];
+            return ['status' => 'error', 'message' => 'Storage filesystem is not mounted.'];
         }
-        $resStatus = ['status' => 'ok'];
-    } else {
-        // Shrink user home image
-        // D-153: Apply same Logical-Aware guards to User Home storage
-        $storageStats = aicli_get_storage_status();
-        $userStats = $storageStats['home_stats'][$type] ?? null;
-        if ($userStats) {
-            $currMb = $userStats['total_mb'];
-            $subMb = intval(preg_replace('/[^0-9]/', '', $sizeSub));
-            $logicalUsed = $userStats['logical_used_mb'] ?? 0;
-            $targetMb = $currMb - $subMb;
-
-            if ($targetMb < ($logicalUsed + 128)) {
-                $safeSub = $currMb - ($logicalUsed + 128);
-                if ($safeSub < 0) $safeSub = 0;
-                if ($safeSub < $subMb) {
-                    aicli_log("Clamping home shrink to prevent I/O Error. Target {$targetMb}MB too close to logical usage {$logicalUsed}MB. Safe Reduction: {$safeSub}MB", AICLI_LOG_WARN);
-                    $subMb = intval($safeSub);
-                    $sizeSub = "{$subMb}M";
-                }
-            }
-            if ($subMb <= 0) {
-                return ['status' => 'error', 'message' => "Persistence cannot be shrunk further. Logical usage ({$logicalUsed}MB) plus buffer exceeds target size. (Physical compression does not allow shrinking below logical data limits)."];
-            }
-        }
-
-        $serviceScript = dirname(__DIR__) . "/scripts/btrfs_delta_service.sh";
-        exec("bash " . escapeshellarg($serviceScript) . " shrink " . escapeshellarg($type) . " " . escapeshellarg($sizeSub) . " 2>&1", $out, $res);
-        $resStatus = $res === 0 ? ['status' => 'ok'] : ['status' => 'error', 'message' => implode("\n", $out)];
+    } finally {
+        if ($type === 'agents') aicli_agent_storage_lock();
+        flock($fp, LOCK_UN);
+        fclose($fp);
+        @unlink($lockFile);
     }
-    
-    flock($fp, LOCK_UN);
-    fclose($fp);
-    @unlink($lockFile);
-    return $resStatus;
 }
 
 /**
@@ -2427,6 +2685,8 @@ function aicli_get_total_reservation() {
 }
 
 function installAgent($agentId) {
+    // D-170: Increase execution time for large agent installs/expansions
+    @set_time_limit(900); // 15 minutes
     if (empty($agentId)) return ['status' => 'error', 'message' => 'No Agent ID'];
 
     $lockFile = "/tmp/unraid-aicliagents/install-$agentId.lock";
@@ -2442,137 +2702,148 @@ function installAgent($agentId) {
     setInstallStatus("Initializing...", 5, $agentId);
 
     aicli_log("installAgent started for $agentId", AICLI_LOG_INFO);
+    
+    // D-195: Proactively stop active sessions and KILL processes for this agent before upgrade
+    // This prevents 'mount busy' errors caused by open file handles to deleted binaries.
+    aicli_log("Scanning for active sessions for agent $agentId before install/upgrade...", AICLI_LOG_DEBUG);
+    foreach (glob("/var/run/unraid-aicliagents-*.agentid") as $af) {
+        $runningAgent = trim(@file_get_contents($af));
+        if ($runningAgent === $agentId) {
+            $sessId = str_replace(['/var/run/unraid-aicliagents-', '.agentid'], '', $af);
+            aicli_log("Stopping active session $sessId for agent $agentId to allow clean upgrade.", AICLI_LOG_INFO);
+            stopAICliTerminal($sessId, true);
+        }
+    }
+    
+    // D-197: Global kill for any node processes running this agent binary root (Catch orphaned or un-tracked processes)
+    exec("pkill -9 -f " . escapeshellarg("/agents/$agentId/node_modules") . " > /dev/null 2>&1");
+
     aicli_agent_storage_unlock();
+    
     try {
         setInstallStatus("Consulting NPM metadata...", 10, $agentId);
         $registry = getAICliAgentsRegistry();
-    if (!isset($registry[$agentId])) {
-        aicli_log("ERROR: Agent $agentId not found in registry", AICLI_LOG_ERROR);
-        return ['status' => 'error', 'error' => 'Agent not found in registry'];
-    }
-    
-    // MANDATORY STORAGE CHECK: Ensure the agent binary storage is mounted.
-    // If it's not mounted, we would be installing into the host RAM disk, which is transient and clobbered on mount.
-    if (!aicli_ensure_agent_storage_mounted()) {
-        aicli_log("ERROR: Agent storage could not be mounted. Installation aborted to prevent data loss.", AICLI_LOG_ERROR);
-        return ['status' => 'error', 'message' => 'Agent storage mount failure. Please check logs.'];
-    }
-    
-    $config = getAICliConfig();
-    $usePreview = ($config["preview_$agentId"] ?? "0") === "1";
-    aicli_log("Using preview channel: " . ($usePreview ? "yes" : "no"), AICLI_LOG_DEBUG);
-    
-    $bootConfig = "/boot/config/plugins/unraid-aicliagents";
-    $cacheDir = "$bootConfig/pkg-cache";
-    $agentBase = "/usr/local/emhttp/plugins/unraid-aicliagents/agents"; // New base for agent installations
-    
-    if (!is_dir($cacheDir)) mkdir($cacheDir, 0777, true);
-    if (!is_dir($agentBase)) mkdir($agentBase, 0777, true); // Ensure agent base directory exists
-
-    $installedVer = "installed";
-
-    // NPM-based agents — D-127: Unified registry mapping
-    $package = $registry[$agentId]['npm_package'] ?? null;
-    if (!$package) {
-        aicli_log("ERROR: No NPM package mapping for $agentId", AICLI_LOG_ERROR);
-        return ['status' => 'error', 'error' => 'NPM package mapping missing'];
-    }
-
-    $usePreview = ($config["preview_$agentId"] ?? "0") === "1";
-    $installPackage = $package;
-    if ($usePreview) {
-        // D-21: Generic tag discovery for preview releases
-        $tagsOutput = [];
-        exec("npm info " . escapeshellarg($package) . " dist-tags --json 2>/dev/null", $tagsOutput);
-        $tags = json_decode(implode("\n", $tagsOutput), true);
+        if (!isset($registry[$agentId])) {
+            aicli_log("ERROR: Agent $agentId not found in registry", AICLI_LOG_ERROR);
+            return ['status' => 'error', 'error' => 'Agent not found in registry'];
+        }
         
-        if (isset($tags['preview'])) {
-            $installPackage .= "@preview";
-        } elseif (isset($tags['next'])) {
-            $installPackage .= "@next";
-        } elseif (isset($tags['nightly'])) {
-            $installPackage .= "@nightly";
+        // MANDATORY STORAGE CHECK: Ensure the agent binary storage is mounted.
+        if (!aicli_ensure_agent_storage_mounted()) {
+            aicli_log("ERROR: Agent storage could not be mounted. Installation aborted to prevent data loss.", AICLI_LOG_ERROR);
+            return ['status' => 'error', 'message' => 'Agent storage mount failure. Please check logs.'];
+        }
+        
+        $config = getAICliConfig();
+        $usePreview = ($config["preview_$agentId"] ?? "0") === "1";
+        aicli_log("Using preview channel: " . ($usePreview ? "yes" : "no"), AICLI_LOG_DEBUG);
+        
+        $bootConfig = "/boot/config/plugins/unraid-aicliagents";
+        $cacheDir = "$bootConfig/pkg-cache";
+        $agentBase = "/usr/local/emhttp/plugins/unraid-aicliagents/agents"; // New base for agent installations
+        
+        if (!is_dir($cacheDir)) mkdir($cacheDir, 0777, true);
+        if (!is_dir($agentBase)) mkdir($agentBase, 0777, true);
+
+        $installedVer = "installed";
+
+        // NPM-based agents — D-127: Unified registry mapping
+        $package = $registry[$agentId]['npm_package'] ?? null;
+        if (!$package) {
+            aicli_log("ERROR: No NPM package mapping for $agentId", AICLI_LOG_ERROR);
+            return ['status' => 'error', 'error' => 'NPM package mapping missing'];
+        }
+
+        $installPackage = $package;
+        if ($usePreview) {
+            $tagsOutput = [];
+            exec("npm info " . escapeshellarg($package) . " dist-tags --json 2>/dev/null", $tagsOutput);
+            $tags = json_decode(implode("\n", $tagsOutput), true);
+            
+            if (isset($tags['preview'])) {
+                $installPackage .= "@preview";
+            } elseif (isset($tags['next'])) {
+                $installPackage .= "@next";
+            } elseif (isset($tags['nightly'])) {
+                $installPackage .= "@nightly";
+            } else {
+                $installPackage .= "@latest";
+            }
         } else {
             $installPackage .= "@latest";
         }
-    } else {
-        $installPackage .= "@latest";
-    }
 
-    // D-27: Optimized Direct Install: No more /tmp staging for NPM as we are writing to a dedicated Btrfs loop mount.
-    $agentDir = "$agentBase/$agentId";
-    
-    // D-77: Pre-Install Storage Validation (Size Prediction)
-    $mntPoint = "/usr/local/emhttp/plugins/unraid-aicliagents/agents";
-    $freeMbOutput = shell_exec("df -m " . escapeshellarg($mntPoint) . " | tail -1 | awk '{print $4}'");
-    $freeMb = intval(trim($freeMbOutput ?? '0'));
-    $pluginDir = "/usr/local/emhttp/plugins/unraid-aicliagents";
+        $agentDir = "$agentBase/$agentId";
+        
+        // D-77: Pre-Install Storage Validation (Size Prediction)
+        $mntPoint = "/usr/local/emhttp/plugins/unraid-aicliagents/agents";
+        $freeMbOutput = shell_exec("df -m " . escapeshellarg($mntPoint) . " | tail -1 | awk '{print $4}'");
+        $freeMb = intval(trim($freeMbOutput ?? '0'));
+        $pluginDir = "/usr/local/emhttp/plugins/unraid-aicliagents";
 
-    // D-86: Multi-factor space requirement (unpackedSize * 3.0 to account for massive NPM trees)
-    $requiredMb = 256; // Standard 256MB base
-    
-    // Attempt more accurate prediction via npm view if online
-    setInstallStatus("Fetching package size and dependencies...", 25, $agentId);
-    $sizeOutput = [];
-    $npmCache = "/tmp/unraid-aicliagents/npm-cache/root";
-    if (!is_dir($npmCache)) @mkdir($npmCache, 0777, true);
-    exec("export NPM_CONFIG_CACHE=" . escapeshellarg($npmCache) . "; export PATH=$pluginDir/bin:\$PATH; $pluginDir/bin/npm view " . escapeshellarg($package) . " dist.unpackedSize 2>/dev/null", $sizeOutput);
-    $unpackedBytes = intval(trim($sizeOutput[0] ?? '0'));
-    if ($unpackedBytes > 0) {
-        // NPM unpackedSize ONLY reflects the agent package, not the thousands of deps it might pull.
-        // We use 3.0x as a safer buffer for deep node_modules trees.
-        $requiredMb = max(256, ceil(($unpackedBytes / 1024 / 1024) * 3.0)); 
-        aicli_log("Size Prediction for $agentId: " . round($unpackedBytes/1024/1024, 2) . " MB unpacked. Requiring $requiredMb MB free (incl. 3x NPM overhead).", AICLI_LOG_DEBUG);
-    }
-
-    // Account for concurrent background installations via reservation tracking
-    $totalReservations = aicli_get_total_reservation();
-    
-    // D-152: Effective Header Check - Account for compression during NPM installs
-    $storageStats = aicli_get_storage_status();
-    $effectiveFreeMb = $storageStats['effective_available_mb'] ?? $freeMb;
-    $predictedAvailable = $effectiveFreeMb - $totalReservations;
-
-    if ($predictedAvailable < $requiredMb) {
-        aicli_log("Space tight for $agentId (Effective $predictedAvailable MB available, $requiredMb MB required). Attempting auto-expansion...", AICLI_LOG_INFO);
-        // D-87: Auto-Expand: Calculate multiples of the 256MB increment
-        $headroom = aicli_get_flash_headroom();
-        $shortfall = $requiredMb - $predictedAvailable;
-        $multiple = ceil($shortfall / 256);
-        $expansionMb = $multiple * 256;
-
-        if ($headroom > ($expansionMb + 100)) {
-             aicli_log("Auto-Expanding Agent storage by {$expansionMb}MB (Multiple of 256MB) to accommodate $agentId...", AICLI_LOG_INFO);
-             aicli_expand_storage('agents', "{$expansionMb}M");
-             // Re-check Effective Space after expansion
-             $storageStats = aicli_get_storage_status();
-             $effectiveFreeMb = $storageStats['effective_available_mb'] ?? 0;
-             $predictedAvailable = $effectiveFreeMb - $totalReservations;
+        $requiredMb = 256; 
+        
+        // D-190: Account for existing agent size if upgrading
+        $existingSizeMb = 0;
+        if (is_dir($agentDir)) {
+            $existingSizeMb = intval(trim((string)shell_exec("du -sm " . escapeshellarg($agentDir) . " | cut -f1")));
+            aicli_log("Detected existing agent size for $agentId: $existingSizeMb MB", AICLI_LOG_DEBUG);
         }
-    }
 
-    if ($predictedAvailable < $requiredMb) {
-        aicli_log("Aborting install of $agentId: Insufficient space after reservations ($predictedAvailable MB available, $requiredMb MB required)", AICLI_LOG_WARN);
-        setInstallStatus("Error: Insufficient Space (Pending: {$totalReservations}MB)", 0, $agentId, 'disk_full');
-        // D-161: Error reporting must match the UI's 'Effective' capacity to avoid user confusion
-        return ['status' => 'error', 'reason' => 'disk_full', 'message' => "Insufficient agent storage. Needed: " . $requiredMb . "MB (+{$totalReservations}MB pending). Only $predictedAvailable MB available (Effective)."];
-    }
+        setInstallStatus("Fetching package size and dependencies...", 25, $agentId);
+        $sizeOutput = [];
+        $npmCache = "/tmp/unraid-aicliagents/npm-cache/root";
+        if (!is_dir($npmCache)) @mkdir($npmCache, 0777, true);
+        exec("export NPM_CONFIG_CACHE=" . escapeshellarg($npmCache) . "; export PATH=$pluginDir/bin:\$PATH; $pluginDir/bin/npm view " . escapeshellarg($package) . " dist.unpackedSize 2>/dev/null", $sizeOutput);
+        $unpackedBytes = intval(trim($sizeOutput[0] ?? '0'));
+        if ($unpackedBytes > 0) {
+            $requiredMb = max(256, ceil(($unpackedBytes / 1024 / 1024) * 3.0)); 
+            aicli_log("Size Prediction for $agentId: " . round($unpackedBytes/1024/1024, 2) . " MB unpacked. Requiring $requiredMb MB free (incl. 3x NPM overhead).", AICLI_LOG_DEBUG);
+        }
 
-        // Lock in the reservation
+        $totalReservations = aicli_get_total_reservation();
+        $storageStats = aicli_get_storage_status();
+        $effectiveFreeMb = $storageStats['effective_available_mb'] ?? $freeMb;
+        
+        $predictedAvailable = ($effectiveFreeMb + $existingSizeMb) - $totalReservations;
+
+        if ($predictedAvailable < $requiredMb) {
+            aicli_log("Space tight for $agentId (Effective $predictedAvailable MB available (incl. $existingSizeMb MB existing), $requiredMb MB required). Attempting auto-expansion...", AICLI_LOG_INFO);
+            $headroom = aicli_get_flash_headroom();
+            $shortfall = $requiredMb - $predictedAvailable;
+            $multiple = ceil($shortfall / 256);
+            $expansionMb = $multiple * 256;
+
+            $config = getAICliConfig();
+            $realImg = rtrim($config['agent_storage_path'] ?? "/boot/config/plugins/unraid-aicliagents", '/') . "/aicli-agents.img";
+            $isOnFlash = (strpos($realImg, "/boot/") === 0);
+
+            if (!$isOnFlash || $headroom > ($expansionMb + 150)) {
+                 aicli_log("Auto-Expanding Agent storage by {$expansionMb}MB (Multiple of 256MB) to accommodate $agentId...", AICLI_LOG_INFO);
+                 aicli_expand_storage('agents', "{$expansionMb}M");
+                 $storageStats = aicli_get_storage_status();
+                 $effectiveFreeMb = $storageStats['effective_available_mb'] ?? 0;
+                 $predictedAvailable = ($effectiveFreeMb + $existingSizeMb) - $totalReservations;
+            }
+        }
+
+        if ($predictedAvailable < $requiredMb) {
+            aicli_log("Aborting install of $agentId: Insufficient space after reservations ($predictedAvailable MB available, $requiredMb MB required)", AICLI_LOG_WARN);
+            setInstallStatus("Error: Insufficient Space (Pending: {$totalReservations}MB)", 0, $agentId, 'disk_full');
+            return ['status' => 'error', 'reason' => 'disk_full', 'message' => "Insufficient agent storage. Needed: " . $requiredMb . "MB (+{$totalReservations}MB pending). Only $predictedAvailable MB available (Effective)."];
+        }
+
         aicli_add_reservation($agentId, $requiredMb);
 
         if (is_dir($agentDir)) exec("rm -rf " . escapeshellarg($agentDir));
         mkdir($agentDir, 0777, true);
         
         setInstallStatus("Downloading & Installing agent via NPM...", 50, $agentId);
-        $pluginDir = "/usr/local/emhttp/plugins/unraid-aicliagents";
         $npmCache = "/tmp/unraid-aicliagents/npm-cache/root";
         if (!is_dir($npmCache)) @mkdir($npmCache, 0777, true);
         
         aicli_log("Running Direct Install into /mnt/agents: $pluginDir/bin/npm install (RAM Cached)", AICLI_LOG_DEBUG);
         $npmOutput = [];
-        // D-108: EXTREMELY IMPORTANT - Set NPM_CONFIG_CACHE to RAM for the PHP-driven installer to prevent USB hang
-        // D-109: Added --no-audit --no-fund --quiet to minimize network and CPU overhead
         exec("export NPM_CONFIG_CACHE=" . escapeshellarg($npmCache) . "; export PATH=$pluginDir/bin:\$PATH; cd " . escapeshellarg($agentDir) . " && $pluginDir/bin/npm install --prefix " . escapeshellarg($agentDir) . " " . escapeshellarg($installPackage) . " --no-audit --no-fund --quiet 2>&1", $npmOutput, $result);
         aicli_log("NPM finished with code $result.", AICLI_LOG_DEBUG);
         
@@ -2587,20 +2858,17 @@ function installAgent($agentId) {
             
             if ($isNoSpace) {
                 aicli_log("ERROR: Disk full during agent installation: $agentId (Cleaning up partial files)", AICLI_LOG_ERROR);
-                exec("rm -rf " . escapeshellarg($agentDir)); // Reclaim space
-                aicli_remove_reservation($agentId);
+                exec("rm -rf " . escapeshellarg($agentDir)); 
                 setInstallStatus("Error: Disk Full", 0, $agentId, 'disk_full');
                 return ['status' => 'error', 'reason' => 'disk_full', 'message' => 'Storage container is full. Please expand storage in Settings.'];
             }
 
             aicli_log("ERROR: NPM install failed for $installPackage (Cleaning up)", AICLI_LOG_ERROR);
             exec("rm -rf " . escapeshellarg($agentDir));
-            aicli_remove_reservation($agentId);
             setInstallStatus("Error: Install failed. Check logs.", 0, $agentId);
             return ['status' => 'error', 'error' => 'NPM install failed: ' . (end($npmOutput) ?: 'Unknown error')];
         }
 
-        // Get installed version from package.json in the target dir
         $pJson = "$agentDir/node_modules/" . str_replace('/', DIRECTORY_SEPARATOR, $package) . "/package.json";
         if (file_exists($pJson)) {
             $pData = json_decode(file_get_contents($pJson), true);
@@ -2608,71 +2876,44 @@ function installAgent($agentId) {
             aicli_log("Detected version from package.json: $installedVer", AICLI_LOG_DEBUG);
         }
 
-    // 2. UNIFIED STORAGE phase (Staging is skipped for NPM direct-to-mount)
-    setInstallStatus("Finalizing permissions...", 90, $agentId);
-    
-    // VERIFICATION: Check if binary exists in the direct install location
-    $binary = $registry[$agentId]['binary'] ?? '';
-    $fallback = $registry[$agentId]['binary_fallback'] ?? '';
-    $exists = (!empty($binary) && file_exists($binary)) || (!empty($fallback) && file_exists($fallback));
-    
-    if (!$exists) {
-        aicli_log("ERROR: Binary missing after direct NPM install ($agentId).", AICLI_LOG_ERROR);
-        aicli_remove_reservation($agentId);
-        setInstallStatus("Error: Binary missing. Check logs.", 0, $agentId);
-        return ['status' => 'error', 'error' => 'Binary verification failed'];
-    }
-
-    // D-26: Force deep recursive permissions to ensure binaries and their targets are executable
-    exec("chmod -R 755 " . escapeshellarg($agentDir));
-    
-    // Explicitly target known binary links and their symlink targets
-    foreach ([$registry[$agentId]['binary'] ?? '', $registry[$agentId]['binary_fallback'] ?? ''] as $b) {
-        if (!empty($b)) {
-            exec("chmod +x " . escapeshellarg($b) . " > /dev/null 2>&1");
-            // If it's a symlink, chmod the real file too
-            exec("chmod +x $(readlink -f " . escapeshellarg($b) . ") > /dev/null 2>&1");
+        setInstallStatus("Finalizing permissions...", 90, $agentId);
+        
+        $binary = $registry[$agentId]['binary'] ?? '';
+        $fallback = $registry[$agentId]['binary_fallback'] ?? '';
+        $exists = (!empty($binary) && file_exists($binary)) || (!empty($fallback) && file_exists($fallback));
+        
+        if (!$exists) {
+            aicli_log("ERROR: Binary missing after direct NPM install ($agentId).", AICLI_LOG_ERROR);
+            setInstallStatus("Error: Binary missing. Check logs.", 0, $agentId);
+            return ['status' => 'error', 'error' => 'Binary verification failed'];
         }
-    }
 
-    // D-25: Clear PHP's internal file status cache to ensure it sees the newly transferred files
-    clearstatcache(true, $agentDir);
-    
-    // VERIFICATION: Discovery after deploy (broad search)
-    $findOutput = [];
-    exec("find " . escapeshellarg($agentDir) . " -maxdepth 3 2>&1", $findOutput);
-    aicli_log("Post-deploy discovery in agentDir ($agentDir) [MaxDepth 3]:\n" . implode("\n", array_slice($findOutput, 0, 50)), AICLI_LOG_DEBUG);
-    
-    $binary = $registry[$agentId]['binary'] ?? '';
-    $fallback = $registry[$agentId]['binary_fallback'] ?? '';
-    $exists = (!empty($binary) && file_exists($binary)) || (!empty($fallback) && file_exists($fallback));
-    
-    if (!$exists) {
-        aicli_log("ERROR: Binary missing after deploy ($agentId) despite tar-pipe. Result code: $result", AICLI_LOG_ERROR);
+        exec("chmod -R 755 " . escapeshellarg($agentDir));
+        foreach ([$binary, $fallback] as $b) {
+            if (!empty($b) && file_exists($b)) {
+                exec("chmod +x " . escapeshellarg($b) . " > /dev/null 2>&1");
+                exec("chmod +x $(readlink -f " . escapeshellarg($b) . ") > /dev/null 2>&1");
+            }
+        }
+
+        clearstatcache(true, $agentDir);
+        
+        setInstallStatus("Finalizing...", 98, $agentId);
+        saveAICliVersion($agentId, $installedVer);
+        gcPkgCache();
+        setInstallStatus("Installation Complete!", 100, $agentId);
+        aicli_sync_agents_to_backend();
+        aicli_log("Agent $agentId installed successfully", AICLI_LOG_INFO);
+        return ['status' => 'ok'];
+
+    } catch (Exception $e) {
+        aicli_log("Installation failed for $agentId: " . $e->getMessage(), AICLI_LOG_ERROR);
+        return ['status' => 'error', 'message' => $e->getMessage()];
+    } finally {
         aicli_remove_reservation($agentId);
-        setInstallStatus("Error: Binary missing after deploy. Check logs.", 0, $agentId);
-        return ['status' => 'error', 'error' => 'Binary verification failed'];
+        aicli_agent_storage_lock();
+        @unlink($lockFile);
     }
-    
-    setInstallStatus("Finalizing...", 98, $agentId);
-    exec("rm -rf " . escapeshellarg($tmpDir));
-
-    saveAICliVersion($agentId, $installedVer);
-    gcPkgCache();
-    aicli_remove_reservation($agentId); // Clear reservation on успеха
-    setInstallStatus("Installation Complete!", 100, $agentId);
-    aicli_sync_agents_to_backend();
-    aicli_agent_storage_lock();
-    aicli_log("Agent $agentId installed successfully", AICLI_LOG_INFO);
-    @unlink("/tmp/unraid-aicliagents/install-$agentId.lock");
-    return ['status' => 'ok'];
-} catch (Exception $e) {
-    aicli_agent_storage_lock();
-    aicli_log("Installation failed: " . $e->getMessage(), AICLI_LOG_ERROR);
-    aicli_remove_reservation($agentId);
-    @unlink("/tmp/unraid-aicliagents/install-$agentId.lock");
-    return ['status' => 'error', 'message' => $e->getMessage()];
-}
 }
 
 function uninstallAgent($agentId) {
@@ -2692,7 +2933,6 @@ function uninstallAgent($agentId) {
         aicli_agent_storage_unlock();
         
         // D-83: Stop all active terminal sessions for this agent BEFORE uninstalling
-        // This prevents orphaned processes from running against a missing binary directory.
         aicli_log("Scanning for active sessions for agent $agentId before uninstall...", AICLI_LOG_INFO);
         foreach (glob("/var/run/unraid-aicliagents-*.agentid") as $af) {
             $runningAgent = trim(@file_get_contents($af));
@@ -2715,7 +2955,7 @@ function uninstallAgent($agentId) {
         $cacheFile = "$cacheDir/$agentId.tar.gz";
         if (file_exists($cacheFile)) {
             aicli_log("Removing cache file: $cacheFile", AICLI_LOG_DEBUG);
-            unlink($cacheFile);
+            @unlink($cacheFile);
         }
         
         // 3. Remove version record
@@ -2739,7 +2979,7 @@ function uninstallAgent($agentId) {
             if ($ws['agentId'] === $agentId) {
                 $changed = true;
                 aicli_log("Pruning workspace session " . ($ws['id'] ?? 'unknown') . " for uninstalled agent $agentId", AICLI_LOG_INFO);
-                if ($activeId === ($ws['id'] ?? null)) $activeId = null; // Clear active if pruned
+                if ($activeId === ($ws['id'] ?? null)) $activeId = null; 
                 continue;
             }
             $newSessions[] = $ws;
@@ -2755,19 +2995,18 @@ function uninstallAgent($agentId) {
         gcPkgCache();
         aicli_sync_agents_to_backend();
         
-        // Cleanup status files to avoid stale progress UI on next install
         $statusFile = "/tmp/unraid-aicliagents/install-status-$agentId";
         if (file_exists($statusFile)) @unlink($statusFile);
 
         aicli_log("Agent $agentId uninstalled successfully", AICLI_LOG_INFO);
-        aicli_agent_storage_lock();
-        @unlink($lockFile);
         return ['status' => 'ok'];
+
     } catch (Exception $e) {
         aicli_log("Uninstall failed for $agentId: " . $e->getMessage(), AICLI_LOG_ERROR);
+        return ['status' => 'error', 'message' => $e->getMessage()];
+    } finally {
         aicli_agent_storage_lock();
         @unlink($lockFile);
-        return ['status' => 'error', 'message' => $e->getMessage()];
     }
 }
 
@@ -2788,7 +3027,7 @@ function checkAgentUpdates() {
         if (empty($agent['is_installed'])) continue;
         $hasUpdate = false;
         $latestVersion = "Unknown";
-        $current = $currentVersions[$id] ?? "0.0.0";
+        $current = $currentVersions[$id] ?? "unknown";
         $usePreview = ($config["preview_$id"] ?? "0") === "1";
 
         // NPM-based agents — D-21: Intelligent tag discovery for updates

@@ -5,7 +5,7 @@
  */
 error_reporting(E_ALL);
 ini_set('display_errors', '0'); 
-set_time_limit(120); // Extended limit for sync/install operations
+set_time_limit(900); // Extended limit for maintenance/sync/install operations
 
 // Fatal Error Handler
 register_shutdown_function(function() {
@@ -75,6 +75,7 @@ if (isset($_GET['action'])) {
         $path = $_GET['path'] ?? null;
         $chatId = $_GET['chatId'] ?? null;
         $agentId = $_GET['agentId'] ?? 'gemini-cli';
+        // startAICliTerminal signature: ($id, $path, $chatSessionId, $agentId)
         startAICliTerminal($id, $path, $chatId, $agentId);
         echo json_encode(['status' => 'ok', 'sock' => "/webterminal/aicliterm-$id/"]);
     } elseif ($action === 'install_agent') {
@@ -314,8 +315,17 @@ if (isset($_GET['action'])) {
         echo json_encode(aicli_expand_storage($type, $inc));
     } elseif ($action === 'shrink_storage') {
         $type = $_GET['type'] ?? 'agents';
-        $dec = ($type === 'agents') ? '256M' : '128M';
+        $dec = 'auto'; // D-170: Shrink to contents + buffer in one go as promised in the UI
         echo json_encode(aicli_shrink_storage($type, $dec));
+    } elseif ($action === 'repair_agent_storage') {
+        aicli_log("AJAX Exec: action=repair_agent_storage", AICLI_LOG_INFO);
+        $res = aicli_repair_agent_storage();
+        echo json_encode(['status' => $res ? 'ok' : 'error', 'message' => $res ? 'Agent storage rescue operation complete.' : 'Agent storage rescue failed.']);
+    } elseif ($action === 'repair_home_storage') {
+        $user = $_GET['user'] ?? 'root';
+        aicli_log("AJAX Exec: action=repair_home_storage (User: $user)", AICLI_LOG_INFO);
+        $res = aicli_repair_home_storage($user);
+        echo json_encode(['status' => $res ? 'ok' : 'error', 'message' => $res ? 'Home storage rescue operation complete.' : 'Home storage rescue failed.']);
     } elseif ($action === 'debug') {
         echo json_encode([
             'status' => 'ok', 

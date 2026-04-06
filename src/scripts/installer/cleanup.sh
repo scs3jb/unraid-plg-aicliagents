@@ -106,7 +106,8 @@ fi
 if [ "$UPGRADE_MODE" = "1" ] && [ -d "$PERSIST_BASE" ]; then
     MIGRATED=0
     for user_item in "$PERSIST_BASE"/*; do
-        if [ -d "$user_item" ] && [[ ! "$user_item" =~ \.img$ ]]; then
+        # D-171: Skip IMGs and already migrated legacy folders
+        if [ -d "$user_item" ] && [[ ! "$user_item" =~ \.img$ ]] && [[ ! "$user_item" =~ \.migrated\. ]]; then
             USER_NAME=$(basename "$user_item")
             USER_HOME="$user_item/home"
             TARGET_IMG="$PERSIST_BASE/home_$USER_NAME.img"
@@ -114,6 +115,10 @@ if [ "$UPGRADE_MODE" = "1" ] && [ -d "$PERSIST_BASE" ]; then
             if [ -d "$USER_HOME" ] && [ ! -f "$TARGET_IMG" ]; then
                 [ "$MIGRATED" -eq 0 ] && step "Modernizing home storage to Btrfs images..."
                 echo "    > Migrating $USER_NAME home..." >&3
+                
+                # D-171: Call the verified migration engine
+                bash "/tmp/aicli-btrfs.sh" migrate "$USER_NAME" "$USER_HOME" "$TARGET_IMG"
+                
                 if [ $? -eq 0 ] && [ -f "$TARGET_IMG" ]; then
                     echo "      [OK] $USER_NAME -> $(basename $TARGET_IMG)" >&3
                     # D-110: After migration, run a one-time prune inside the new image

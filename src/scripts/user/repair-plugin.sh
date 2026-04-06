@@ -7,7 +7,8 @@ mkdir -p "$(dirname "$STATUS_FILE")"
 
 log_progress() {
     local pct=$1 msg=$2
-    echo "PROGRESS: $pct | $msg"
+    # D-170: Use timestamped logging for professional appearance
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] PROGRESS: $pct% | $msg"
     echo "{\"progress\": $pct, \"message\": \"$msg\", \"timestamp\": $(date +%s)}" > "$STATUS_FILE"
 }
 
@@ -55,7 +56,7 @@ mkdir -p "$(dirname "$MOUNT_LOCK")"
     
     # D-168: If already mounted (by PHP race), skip and log
     if mountpoint -q "$AGENT_MNT"; then
-         log_progress 30 "Storage already mounted by Stabilizer. Proceeding..."
+         log_progress 30 "Storage already mounted. Proceeding..."
     else
         mount -o loop,compress=zstd:1,noatime,nodiratime,autodefrag "$IMAGE_PATH" "$AGENT_MNT"
         if [ $? -ne 0 ]; then
@@ -63,6 +64,15 @@ mkdir -p "$(dirname "$MOUNT_LOCK")"
             btrfs rescue zero-log "$IMAGE_PATH" >/dev/null 2>&1
             btrfs rescue super-recover "$IMAGE_PATH" -y >/dev/null 2>&1
             mount -o loop,compress=zstd:1,noatime,nodiratime,autodefrag "$IMAGE_PATH" "$AGENT_MNT"
+            
+            # D-170: NUCLEAR OPTION - Recreate image if corrupted beyond repair
+            if [ $? -ne 0 ]; then
+                log_progress 30 "CRITICAL: Image unrecoverable. Recreating fresh 512MB volume..."
+                rm -f "$IMAGE_PATH"
+                truncate -s 512M "$IMAGE_PATH"
+                mkfs.btrfs -f "$IMAGE_PATH" >/dev/null 2>&1
+                mount -o loop,compress=zstd:1,noatime,nodiratime,autodefrag "$IMAGE_PATH" "$AGENT_MNT"
+            fi
         fi
     fi
 ) 200>"$MOUNT_LOCK"

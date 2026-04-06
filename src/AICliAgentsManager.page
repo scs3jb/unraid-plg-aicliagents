@@ -13,7 +13,7 @@ $csrf_token = $var['csrf_token'] ?? '';
 $users = getUnraidUsers();
 ?>
 
-<!-- AICli CSS Cache-Buster: 2026.04.02.41 -->
+<!-- AICli CSS Cache-Buster: 2026.04.05.04 -->
 <style>
     .aicli-layout { display: flex !important; gap: 20px !important; align-items: flex-start !important; width: 100% !important; margin-top: 10px !important; }
 
@@ -41,7 +41,6 @@ $users = getUnraidUsers();
     }
     .aicli-card-body { padding: 15px; color: var(--text-color, #ccc); }
 
-    /* Force DL/DD to stay as a tight horizontal row (Standard Unraid Dashboard Look) */
     .aicli-card-body dl {
         display: grid !important;
         grid-template-columns: 180px 1fr !important;
@@ -64,7 +63,7 @@ $users = getUnraidUsers();
         margin: 0 !important;
         color: var(--text-color) !important;
         display: flex !important;
-        flex-direction: row !important; /* D-75: Force horizontal rows inside the grid column */
+        flex-direction: row !important;
         flex-wrap: wrap !important;
         align-items: center !important;
         gap: 10px !important;
@@ -82,30 +81,13 @@ $users = getUnraidUsers();
         line-height: 22px !important;
         box-sizing: border-box;
         margin: 0 !important;
-        flex: 0 1 auto !important; /* Don't force full width to prevent stacking */
+        flex: 0 1 auto !important;
         min-width: 100px;
         max-width: 350px;
     }
     .aicli-card-body input[type="number"] { width: 80px !important; text-align: left !important; }
     .aicli-card-body input[type="checkbox"] { flex: 0 0 auto !important; width: auto !important; min-width: 0 !important; height: auto !important; margin: 0 !important; cursor: pointer; }
-    /* Removed width: 0 layout adjustments for home_path/root_path to ensure visibility */
-    .aicli-btn {
-        padding: 10px 20px;
-        border-radius: 4px;
-        cursor: pointer;
-        font-weight: bold;
-        font-size: 0.9em;
-        transition: all 0.15s ease;
-        background: var(--button-text-color, #ff8c00) !important;
-        border: none !important;
-        color: #fff !important;
-        text-transform: uppercase;
-        width: 100%;
-        margin-top: 10px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.3);
-        display: block;
-        text-align: center;
-    }
+    
     .aicli-btn {
         padding: 10px 20px;
         border-radius: 4px;
@@ -158,7 +140,7 @@ $users = getUnraidUsers();
     }
 
     .agent-item {
-        display: flex; align-items: center; gap: 6px; padding: 4px 8px; /* Reduced from 10px/6px */
+        display: flex; align-items: center; gap: 6px; padding: 4px 8px;
         border: 1px solid var(--border-color, #3a3a3a); border-radius: 6px; margin-bottom: 4px;
         background: rgba(0,0,0,0.1);
     }
@@ -172,11 +154,9 @@ $users = getUnraidUsers();
     .install-bar { height: 100%; background: #ff8c00; width: 0%; transition: width 0.3s; }
     .install-text { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 10px; color: #fff; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.8); }
 
-    /* Unraid style info icon */
     .info-icon { color: #3a87ad; cursor: pointer; font-size: 14px; }
     .info-icon:hover { color: #2d6987; }
 
-    /* Modal Overlay Styles */
     .aicli-modal-backdrop {
         position: fixed; top: 0; left: 0; width: 100%; height: 100%;
         background: rgba(0,0,0,0.7); display: none; align-items: center; justify-content: center; z-index: 9999;
@@ -227,7 +207,6 @@ $users = getUnraidUsers();
     .swal-wide p { text-align: left !important; white-space: pre-wrap !important; font-family: monospace !important; font-size: 11px !important; line-height: 1.4 !important; opacity: 0.9; }
     .swal-wide .sa-confirm-button-container { display: block; }
 
-    /* System Info Layout Fix */
     .aicli-info-row { display: flex; align-items: center; gap: 15px; margin-bottom: 8px; font-size: 0.95em; }
     .aicli-info-label { width: 180px; flex-shrink: 0; opacity: 0.6; color: var(--text-color); }
     .aicli-info-value { flex: 1; display: flex; align-items: center; gap: 8px; min-width: 0; }
@@ -238,7 +217,6 @@ $users = getUnraidUsers();
     .aicli-pill-btn.danger { background: #cc0000; color: #fff; }
     .aicli-pill-btn.danger:hover { background: #aa0000; }
 
-    /* D-162: Agent Configuration Sub-Card Styling - Updated for Right-Side Layout */
     .agent-config-subcard {
         background: rgba(0,0,0,0.03);
         border: 1px solid rgba(255,255,255,0.05);
@@ -315,7 +293,6 @@ $users = getUnraidUsers();
         <form onsubmit="saveAICliAgentsManager(this); return false;" id="aicli-settings-form">
             <input type="hidden" name="csrf_token" value="<?=$csrf_token?>">
             
-            <!-- CARD: GLOBAL SETTINGS -->
             <div class="aicli-card">
                 <div class="aicli-card-header">
                     <i class="fa fa-globe text-orange-500"></i>
@@ -362,7 +339,6 @@ $users = getUnraidUsers();
                 </div>
             </div>
 
-            <!-- CARD: SESSION PROFILE -->
             <div class="aicli-card">
                 <div class="aicli-card-header">
                     <i class="fa fa-user-circle text-orange-500"></i>
@@ -434,7 +410,6 @@ $users = getUnraidUsers();
                 </div>
             </div>
             
-            <!-- CARD: SECRETS VAULT -->
             <div class="aicli-card">
                 <div class="aicli-card-header">
                     <i class="fa fa-key text-orange-500"></i>
@@ -451,7 +426,7 @@ $users = getUnraidUsers();
                         $registry = getAICliAgentsRegistry();
                         $displayedKeys = [];
                         
-                        foreach ($registry as $agent) {
+                        foreach ($registry as $agent):
                             if (!$agent['is_installed']) continue;
                             $keyName = ($agent['env_prefix'] ?? 'AGENT') . "_API_KEY";
                             if (in_array($keyName, $displayedKeys)) continue;
@@ -462,7 +437,7 @@ $users = getUnraidUsers();
                                 <input type="password" name="<?= $keyName ?>" value="<?= htmlspecialchars($vault[$keyName] ?? '') ?>" placeholder="Enter API Key">
                             </dd>
                             <?php
-                        }
+                        endforeach;
                         
                         if (empty($displayedKeys)) {
                             echo "<p style='padding: 10px; opacity: 0.5; font-size: 0.9em;'>No agents installed. Install an agent to configure its API key.</p>";
@@ -477,7 +452,6 @@ $users = getUnraidUsers();
         </form>
     </div>
 
-    <!-- SIDEBAR: AGENT STORE -->
     <div class="aicli-side">
         <div class="aicli-card">
             <div class="aicli-card-header" style="justify-content: space-between;">
@@ -509,7 +483,7 @@ $users = getUnraidUsers();
                         </div>
                         <div class="agent-status <?=($agent['is_installed']?'installed':'')?>" id="status-<?=$id?>">
                             <?php if ($agent['is_installed']): ?>
-                                <i class="fa fa-check-circle"></i> Installed (<?=$updates[$id]['installed_version'] ?? '?'?>)
+                                <i class="fa fa-check-circle"></i> Installed (v<?=$updates[$id]['installed_version'] ?? '?'?>)
                             <?php else: ?>
                                 Not Installed
                             <?php endif; ?>
@@ -517,7 +491,7 @@ $users = getUnraidUsers();
 
                         <?php if ($hasUpdate && $agent['is_installed']): ?>
                             <div class="agent-status update" id="update-status-<?=$id?>" style="margin-top: 1px;">
-                                <i class="fa fa-arrow-circle-up"></i> Update Available (<?=$updates[$id]['latest_version']?>)
+                                <i class="fa fa-arrow-circle-up"></i> Update Available (v<?=$updates[$id]['latest_version']?>)
                             </div>
                         <?php endif; ?>
 
@@ -538,7 +512,6 @@ $users = getUnraidUsers();
                         <?php endif; ?>
                     </div>
 
-                    <!-- D-162: Agent Configuration Sub-Card (Balanced 2-Row) -->
                     <div class="agent-config-subcard">
                         <div class="config-row">
                             <label title="Restrict Node.js memory usage">Node Memory:</label>
@@ -560,7 +533,6 @@ $users = getUnraidUsers();
             </div>
         </div>
 
-        <!-- CARD: SYSTEM INFORMATION -->
         <div class="aicli-card">
             <div class="aicli-card-header">
                 <i class="fa fa-info-circle text-orange-500"></i>
@@ -577,7 +549,6 @@ $users = getUnraidUsers();
                 </div>
                 
                 <div class="aicli-info-row">
-
                     <div class="aicli-info-label">Config File:</div>
                     <div class="aicli-info-value"><code>/boot/config/plugins/unraid-aicliagents/unraid-aicliagents.cfg</code></div>
                 </div>
@@ -590,15 +561,6 @@ $users = getUnraidUsers();
                             <span onclick="viewDebugLog()" class="aicli-pill-btn">VIEW</span>
                             <span onclick="clearLog()" class="aicli-pill-btn danger">CLEAR</span>
                         </div>
-                    </div>
-                </div>
-
-                <div class="aicli-info-row">
-                    <div class="aicli-info-label">Repair & Rescue:</div>
-                    <div class="aicli-info-value">
-                        <button type="button" class="aicli-pill-btn danger" onclick="executeRepair()" title="Re-install all agents and repair storage image" style="padding: 6px 14px; font-size: 10px;">
-                            <i class="fa fa-wrench"></i> REPAIR PLUGIN
-                        </button>
                     </div>
                 </div>
 
@@ -647,9 +609,13 @@ $users = getUnraidUsers();
                         <div id="storage-status-active" style="display:none; flex-direction:column; gap:4px; width:100%;">
                             <div style="display:flex; justify-content:space-between; align-items:center; width:100%;">
                                 <code id="storage-usage-text" style="white-space:nowrap;">0MB / 0MB</code>
-                                <div class="aicli-info-btns">
-                                    <span onclick="shrinkStorage('agents')" class="aicli-pill-btn danger" title="Decrease image size by 256MB">-256MB</span>
-                                    <span id="btn-expand-storage" onclick="expandStorage('agents')" class="aicli-pill-btn" title="Increase image size by 256MB">+256MB</span>
+                                <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
+                                    <span id="storage-ro-label" class="aicli-pill-btn" style="background: #3a87ad; cursor: default; display: none;">READ-ONLY</span>
+                                    <div class="aicli-info-btns">
+                                        <span onclick="repairAgentStorage(this)" class="aicli-pill-btn warning" title="Repair Storage: Fix mount issues and metadata mismatches">Repair</span>
+                                        <span onclick="shrinkStorage('agents', this)" class="aicli-pill-btn danger" title="Optimize storage: Shrink to minimum safe size">Shrink</span>
+                                        <span id="btn-expand-storage" onclick="expandStorage('agents', null, this)" class="aicli-pill-btn" title="Increase image size by 256MB">+256MB</span>
+                                    </div>
                                 </div>
                             </div>
                             <div style="height:6px; background:#333; border-radius:3px; overflow:hidden; width:100%; position:relative;">
@@ -663,13 +629,12 @@ $users = getUnraidUsers();
                 <div id="home_storage_container"></div>
 
                 <p class="help-text">
-                    To protect your Flash drive from wear, agents are optimized to execute from RAM. This plugin utilizes a <b>Hybrid RAM-Persistence storage</b> system; your home directory is restored automatically on boot and synchronized back to your chosen storage location. The default configuration provides the best balance of accessibility vs performance on standard Unraid deployments.
+                    To protect your Flash drive from wear, agents are optimized to execute from RAM. This plugin utilizes a <b>Hybrid RAM-Persistence storage</b> system; your home directory is restored automatically on boot and synchronized back to your chosen storage location.
                 </p>
             </div>
         </div>
     </div>
 
-    <!-- Picker Modal (still used for directory selection) -->
     <div id="picker-modal" class="aicli-modal-backdrop">
         <div class="aicli-modal-box">
             <div class="aicli-modal-header">
@@ -677,9 +642,7 @@ $users = getUnraidUsers();
             </div>
             <div class="aicli-modal-body">
                 <div id="picker-path" class="aicli-modal-path">/mnt</div>
-                <div id="picker-list" class="aicli-modal-list">
-                    <!-- Items will be injected here -->
-                </div>
+                <div id="picker-list" class="aicli-modal-list"></div>
             </div>
             <div class="aicli-modal-footer">
                 <button type="button" class="aicli-modal-btn secondary" onclick="closePicker()">Cancel</button>
@@ -697,18 +660,13 @@ function getCsrf() {
     return window.csrf_token || (typeof csrf_token !== 'undefined' ? csrf_token : '');
 }
 
-var codeAZ; // Polyfill for Dynamix shortcut handler (Andrew Zawadzki's codeAZ conflict)
 var aicli_csrf = getCsrf();
-var isInstalling = false; // Legacy flag, using activeInstalls now
 var progressTimers = {};
 var activeInstalls = new Set();
-var isGlobalLocked = false;
 var isUnloading = false;
-window.addEventListener('beforeunload', () => { isUnloading = true; });
+window.addEventListener('beforeunload', function() { isUnloading = true; });
 
-// Bind native Unraid file picker UI
 $(function() {
-    // D-65: Defensive check for fileTreeAttach to prevent TypeError if library is delayed
     if ($.isFunction($.fn.fileTreeAttach)) {
         $('input[data-pickroot]').fileTreeAttach(null, null, function(path) {
             $(document).trigger('close.fileTree');
@@ -717,75 +675,71 @@ $(function() {
     }
 });
 
-function openCreateUserModal() {
-    window.open('/Users/UserAdd', '_blank');
-}
+function openCreateUserModal() { window.open('/Users/UserAdd', '_blank'); }
 
 function refreshUserList() {
     aicli_csrf = getCsrf();
-    fetch(`/plugins/unraid-aicliagents/AICliAjax.php?action=get_users&csrf_token=${encodeURIComponent(aicli_csrf)}`)
-        .then(r => r.json())
-        .then(data => {
+    fetch('/plugins/unraid-aicliagents/AICliAjax.php?action=get_users&csrf_token=' + encodeURIComponent(aicli_csrf))
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
             if (data.status === 'ok' && data.users) {
                 const select = document.getElementById('user_select');
                 const currentVal = select.value;
                 select.innerHTML = '';
-                Object.entries(data.users).forEach(([u, d]) => {
+                Object.entries(data.users).forEach(function(pair) {
+                    const u = pair[0];
+                    const d = pair[1];
                     const opt = document.createElement('option');
                     opt.value = u;
-                    opt.innerText = u + (d && u !== d ? ` (${d})` : "");
+                    opt.innerText = u + (d && u !== d ? ' (' + d + ')' : "");
                     select.appendChild(opt);
                 });
-                select.value = currentVal; // Preserve selection
+                select.value = currentVal;
                 onUserChange(currentVal);
             }
         });
 }
 
 function onUserChange(username) {
-    // Dynamically update UI paths to show user what will happen on save
     const ramDisplay = document.getElementById('display_ram_dir');
     const homeInput = document.getElementById('home_path');
     const homeDisplay = document.getElementById('display_home_path');
-    
-    if (ramDisplay) ramDisplay.innerText = `/tmp/unraid-aicliagents/work/${username}`;
-    if (homeInput) homeInput.value = `/boot/config/plugins/unraid-aicliagents/persistence/${username}/home`;
-    if (homeDisplay) homeDisplay.innerText = `/boot/config/plugins/unraid-aicliagents/persistence/${username}/home`;
+    if (ramDisplay) ramDisplay.innerText = '/tmp/unraid-aicliagents/work/' + username;
+    if (homeInput) homeInput.value = '/boot/config/plugins/unraid-aicliagents/persistence/' + username + '/home';
+    if (homeDisplay) homeDisplay.innerText = '/boot/config/plugins/unraid-aicliagents/persistence/' + username + '/home';
 }
 
 function checkUpdates() {
     if (activeInstalls.size > 0) return;
     const btn = document.getElementById('btn-check-updates');
-    console.log("[AICli] Checking for updates...");
     btn.disabled = true;
     btn.innerHTML = '<i class="fa fa-circle-o-notch fa-spin"></i> Checking...';
-
     aicli_csrf = getCsrf();
-    fetch(`/plugins/unraid-aicliagents/AICliAjax.php?action=check_updates&csrf_token=${encodeURIComponent(aicli_csrf)}`)
-        .then(r => r.json())
-        .then(data => {
+    fetch('/plugins/unraid-aicliagents/AICliAjax.php?action=check_updates&csrf_token=' + encodeURIComponent(aicli_csrf))
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
             btn.disabled = false;
             btn.innerHTML = '<i class="fa fa-refresh"></i> Check for Updates';
-            
             if (data.status === 'ok' && data.updates) {
-                Object.entries(data.updates).forEach(([id, info]) => {
-                    const status = document.getElementById(`status-${id}`);
+                Object.entries(data.updates).forEach(function(pair) {
+                    const id = pair[0];
+                    const info = pair[1];
+                    const status = document.getElementById('status-' + id);
                     if (status && info.has_update) {
-                        let updateDiv = document.getElementById(`update-status-${id}`);
+                        let updateDiv = document.getElementById('update-status-' + id);
                         if (!updateDiv) {
                             updateDiv = document.createElement('div');
-                            updateDiv.id = `update-status-${id}`;
+                            updateDiv.id = 'update-status-' + id;
                             updateDiv.className = 'agent-status update';
                             updateDiv.style.marginTop = '1px';
                             status.parentNode.insertBefore(updateDiv, status.nextSibling);
                         }
-                        updateDiv.innerHTML = `<i class="fa fa-arrow-circle-up"></i> Update Available (${info.latest_version})`;
+                        updateDiv.innerHTML = '<i class="fa fa-arrow-circle-up"></i> Update Available (' + info.latest_version + ')';
                     }
                 });
             }
         })
-        .catch(err => {
-            console.error(err);
+        .catch(function() {
             btn.disabled = false;
             btn.innerHTML = '<i class="fa fa-refresh"></i> Check for Updates';
         });
@@ -793,15 +747,11 @@ function checkUpdates() {
 
 function viewDebugLog() {
     aicli_csrf = getCsrf();
-    fetch(`/plugins/unraid-aicliagents/AICliAjax.php?action=get_log&csrf_token=${encodeURIComponent(aicli_csrf)}`)
-        .then(r => r.text())
-        .then(text => {
+    fetch('/plugins/unraid-aicliagents/AICliAjax.php?action=get_log&csrf_token=' + encodeURIComponent(aicli_csrf))
+        .then(function(r) { return r.text(); })
+        .then(function(text) {
             if (typeof swal === 'function') {
-                swal({
-                    title: "Debug Log (Last 50 lines)",
-                    text: text || "Log is empty.",
-                    customClass: "swal-wide"
-                });
+                swal({ title: "Debug Log", text: text || "Log is empty.", customClass: "swal-wide" });
             }
         });
 }
@@ -810,182 +760,138 @@ function manualSyncHome() {
     aicli_csrf = getCsrf();
     const btn = event.currentTarget;
     const originalHtml = btn.innerHTML;
-    
-    // Show non-closable overlay
     if (typeof swal === 'function') {
-        swal({
-            title: "Syncing to Flash...",
-            text: "Mirroring RAM home directory to the USB drive. This may take a few moments depending on the amount of data.",
-            type: "info",
-            showConfirmButton: false,
-            closeOnConfirm: false
-        });
+        swal({ title: "Syncing...", text: "Please wait...", type: "info", showConfirmButton: false });
     }
-
     btn.disabled = true;
-    btn.innerHTML = '<i class="fa fa-circle-o-notch fa-spin"></i> Syncing...';
-
-    fetch(`/plugins/unraid-aicliagents/AICliAjax.php?action=sync_home&csrf_token=${encodeURIComponent(aicli_csrf)}`)
-        .then(r => {
-            if (!r.ok) throw new Error(`HTTP error! status: ${r.status}`);
-            return r.text().then(text => {
-                try {
-                    return JSON.parse(text);
-                } catch (e) {
-                    console.error("[AICli] Failed to parse sync response:", text);
-                    throw new Error("Invalid JSON response from server");
-                }
-            });
-        })
-        .then(data => {
+    btn.innerHTML = 'Syncing...';
+    fetch('/plugins/unraid-aicliagents/AICliAjax.php?action=sync_home&csrf_token=' + encodeURIComponent(aicli_csrf))
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
             btn.disabled = false;
             btn.innerHTML = originalHtml;
             if (data.status === 'ok') {
-                if (typeof swal === 'function') {
-                    swal({
-                        title: "Sync Successful",
-                        text: "Home directory contents have been mirrored to the USB Flash drive.",
-                        type: "success",
-                        confirmButtonText: "Close"
-                    });
-                }
+                swal({ title: "Sync Successful", type: "success" });
             } else {
-                if (typeof swal === 'function') {
-                    swal("Sync Failed", "There was an error syncing to flash. Check debug logs.", "error");
-                }
-            }
-        })
-        .catch(err => {
-            console.error(err);
-            btn.disabled = false;
-            btn.innerHTML = originalHtml;
-            if (typeof swal === 'function') {
-                swal("Sync Error", "Network or server error during sync.", "error");
+                swal("Sync Failed", "Error syncing to flash.", "error");
             }
         });
 }
 
 function clearLog() {
-    swal({
-        title: "Clear debug log?",
-        text: "This will truncate the current debug.log file in RAM.",
-        type: "warning",
+    swal({ 
+        title: "Clear Log?", 
+        type: "warning", 
         showCancelButton: true,
-        confirmButtonText: "Clear Log",
-        cancelButtonText: "Cancel",
+        showLoaderOnConfirm: true,
         closeOnConfirm: false
     }, function() {
         aicli_csrf = getCsrf();
-        fetch(`/plugins/unraid-aicliagents/AICliAjax.php?action=clear_log&csrf_token=${encodeURIComponent(aicli_csrf)}`)
-            .then(r => r.json())
-            .then(data => {
+        fetch('/plugins/unraid-aicliagents/AICliAjax.php?action=clear_log&csrf_token=' + encodeURIComponent(aicli_csrf))
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
                 if (data.status === 'ok') {
-                    swal("Log Cleared", "The debug log has been truncated.", "success");
+                    swal("Cleared", "The debug log has been emptied.", "success");
                 } else {
-                    swal("Error", "Failed to clear log: " + (data.message || 'Unknown error'), "error");
+                    swal("Error", data.message || "Failed to clear log.", "error");
                 }
             })
-            .catch(() => {
-                swal("Error", "Network error while clearing log.", "error");
+            .catch(function() {
+                swal("Error", "Network error occurred while clearing log.", "error");
             });
     });
 }
 
+function repairAgentStorage(btn = null) {
+    swal({ 
+        title: "Repair Agent Storage?", 
+        text: "This will attempt to fix mount issues and Btrfs metadata mismatches. This is recommended if agents appear missing after a reboot.", 
+        type: "warning", 
+        showCancelButton: true,
+        showLoaderOnConfirm: true,
+        closeOnConfirm: false
+    }, function(isConfirm) {
+        if (!isConfirm) return;
+        const csrf = getCsrf();
+        fetch('/plugins/unraid-aicliagents/AICliAjax.php?action=repair_agent_storage&csrf_token=' + encodeURIComponent(csrf))
+            .then(function(r) { return r.json(); })
+            .then(function(data) { 
+                if (data.status === 'ok') {
+                    swal("Repair Successful", data.message || "Storage remounted.", "success");
+                } else {
+                    swal("Repair Failed", data.message || "An error occurred during repair.", "error");
+                }
+                refreshStorageStatus(); 
+            })
+            .catch(function() {
+                swal("Error", "Network error occurred while repairing storage.", "error");
+            });
+    });
+}
 
-
-function setAgentStoreLocked(locked) {
-    isGlobalLocked = locked;
-    // We only disable buttons if we reach a certain limit or if we want to prevent UNINSTALLS during installs.
-    // For now, let's keep it fluid.
+function repairHomeStorage(user, btn = null) {
+    swal({ 
+        title: "Repair Home Storage?", 
+        text: "This will attempt to rescue the home image for '" + user + "' if it has become stuck in Read-Only mode. Existing data will be preserved.", 
+        type: "warning", 
+        showCancelButton: true,
+        showLoaderOnConfirm: true,
+        closeOnConfirm: false
+    }, function(isConfirm) {
+        if (!isConfirm) return;
+        const csrf = getCsrf();
+        fetch('/plugins/unraid-aicliagents/AICliAjax.php?action=repair_home_storage&user=' + encodeURIComponent(user) + '&csrf_token=' + encodeURIComponent(csrf))
+            .then(function(r) { return r.json(); })
+            .then(function(data) { 
+                if (data.status === 'ok') {
+                    swal("Repair Successful", data.message || "Home storage remounted RW.", "success");
+                } else {
+                    swal("Repair Failed", data.message || "An error occurred during rescue.", "error");
+                }
+                refreshStorageStatus(); 
+            })
+            .catch(function() {
+                swal("Error", "Network error occurred while repairing storage.", "error");
+            });
+    });
 }
 
 function pollInstallStatus(agentId) {
     aicli_csrf = getCsrf();
-    fetch(`/plugins/unraid-aicliagents/AICliAjax.php?action=get_install_status&agentId=${agentId}&csrf_token=${encodeURIComponent(aicli_csrf)}`)
-        .then(r => r.json())
-        .then(data => {
-            const textEl = document.getElementById(`text-${agentId}`);
-            const barEl = document.getElementById(`bar-${agentId}`);
-            const statusEl = document.getElementById(`status-${agentId}`);
-            const btnInstall = document.getElementById(`btn-install-${agentId}`);
-            const btnUpgrade = document.getElementById(`btn-upgrade-${agentId}`);
-
+    fetch('/plugins/unraid-aicliagents/AICliAjax.php?action=get_install_status&agentId=' + agentId + '&csrf_token=' + encodeURIComponent(aicli_csrf))
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            const textEl = document.getElementById('text-' + agentId);
+            const barEl = document.getElementById('bar-' + agentId);
+            const statusEl = document.getElementById('status-' + agentId);
+            const btnInstall = document.getElementById('btn-install-' + agentId);
+            const btnUpgrade = document.getElementById('btn-upgrade-' + agentId);
             if (data.message) {
                 if (textEl) textEl.innerText = data.message;
                 if (barEl) barEl.style.width = data.progress + '%';
             }
-            
             if (data.progress >= 100) {
                 clearInterval(progressTimers[agentId]);
                 delete progressTimers[agentId];
                 activeInstalls.delete(agentId);
-                
-                if (statusEl) {
-                    statusEl.className = 'agent-status installed';
-                    statusEl.innerHTML = '<i class="fa fa-check-circle"></i> ' + (data.message || 'Installed');
-                }
-                
-                // Only reload if this was the last active install
-                if (activeInstalls.size === 0) {
-                    setTimeout(() => { if (!isUnloading) window.location.reload(); }, 2000);
-                }
-            } else if (data.message && data.message.includes('Error:')) {
+                if (statusEl) statusEl.className = 'agent-status installed';
+                if (activeInstalls.size === 0) setTimeout(function() { window.location.reload(); }, 2000);
+            } else if (data.message && data.message.indexOf('Error:') !== -1) {
                 clearInterval(progressTimers[agentId]);
                 delete progressTimers[agentId];
                 activeInstalls.delete(agentId);
                 if (btnInstall) btnInstall.disabled = false;
                 if (btnUpgrade) btnUpgrade.disabled = false;
-                
-                if (data.reason === 'disk_full') {
-                        swal({
-                            title: "Disk Full (Agent Storage)",
-                            text: "The agent storage container is full and requires expansion to complete this installation.",
-                            type: "warning",
-                            showCancelButton: true,
-                            confirmButtonText: "Expand Storage Now",
-                            cancelButtonText: "Retry Later",
-                            closeOnConfirm: false // Keep swal open for the next state
-                        }, function(confirmed) {
-                            if (confirmed) {
-                                expandStorage('agents', () => {
-                                    swal({
-                                        title: "Storage Expanded",
-                                        text: "The storage image was successfully expanded. Would you like to retry the installation now?",
-                                        type: "success",
-                                        showCancelButton: true,
-                                        confirmButtonText: "Retry Installation",
-                                        cancelButtonText: "Later",
-                                        closeOnConfirm: true
-                                    }, function(retry) {
-                                        if (retry) performAgentInstall(agentId, false, btnInstall || btnUpgrade);
-                                    });
-                                });
-                            }
-                        });
-                }
+                swal("Failed", data.message, "error");
             }
-        })
-        .catch(err => {
-            if (isUnloading) return;
-            console.error(`[AICli] Poll Error for ${agentId}:`, err);
         });
 }
 
 function installAgent(agentId, isUpgrade = false, btn = null) {
     if (activeInstalls.has(agentId)) return;
-    
     if (isUpgrade) {
-        swal({
-            title: "Upgrade Agent?",
-            text: `Confirm upgrading ${agentId} to the latest version.`,
-            type: "info",
-            showCancelButton: true,
-            confirmButtonText: "Upgrade Now",
-            cancelButtonText: "Cancel"
-        }, function(confirmed) {
-            if (confirmed) {
-                performAgentInstall(agentId, isUpgrade, btn);
-            }
+        swal({ title: "Upgrade?", text: "Upgrade " + agentId, type: "info", showCancelButton: true }, function(confirmed) {
+            if (confirmed) performAgentInstall(agentId, isUpgrade, btn);
         });
     } else {
         performAgentInstall(agentId, isUpgrade, btn);
@@ -993,77 +899,37 @@ function installAgent(agentId, isUpgrade = false, btn = null) {
 }
 
 function performAgentInstall(agentId, isUpgrade, btn) {
-    
-    const status = document.getElementById(`status-${agentId}`);
-    const progress = document.getElementById(`progress-${agentId}`);
-    const bar = document.getElementById(`bar-${agentId}`);
-    const text = document.getElementById(`text-${agentId}`);
-    
-    // Disable the button which was clicked
+    const status = document.getElementById('status-' + agentId);
+    const progress = document.getElementById('progress-' + agentId);
+    const bar = document.getElementById('bar-' + agentId);
     if (btn) btn.disabled = true;
-
     progress.style.display = 'block';
-    bar.style.width = '10%';
-    if (text) text.innerText = 'Starting...';
-    status.innerHTML = '<i class="fa fa-circle-o-notch fa-spin"></i> ' + (isUpgrade ? 'Upgrading...' : 'Installing...');
-
+    bar.style.width = '2%';
     aicli_csrf = getCsrf();
-    fetch(`/plugins/unraid-aicliagents/AICliAjax.php?action=install_agent&agentId=${agentId}&csrf_token=${encodeURIComponent(aicli_csrf)}`)
-        .then(r => r.json())
-        .then(data => {
+    fetch('/plugins/unraid-aicliagents/AICliAjax.php?action=install_agent&agentId=' + agentId + '&csrf_token=' + encodeURIComponent(aicli_csrf))
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
             if (data.status === 'ok') {
-                if (progressTimers[agentId]) clearInterval(progressTimers[agentId]);
-                progressTimers[agentId] = setInterval(() => pollInstallStatus(agentId), 800);
+                progressTimers[agentId] = setInterval(function() { pollInstallStatus(agentId); }, 800);
             } else {
                 activeInstalls.delete(agentId);
                 if (btn) btn.disabled = false;
-                swal("Installation Failed", (data.message || data.error), "error");
-                status.innerHTML = 'Start Failed';
+                swal("Failed", data.message || data.error, "error");
             }
-        })
-        .catch(err => {
-            if (isUnloading) return;
-            activeInstalls.delete(agentId);
-            if (btn) btn.disabled = false;
-            console.error('[AICli] Start Error:', err);
-            swal("Network Error", "Process might still be starting in background.", "warning");
         });
 }
 
 function uninstallAgent(agentId, btn = null) {
-    if (activeInstalls.has(agentId)) return;
-    
-    swal({
-        title: "Uninstall Agent?",
-        text: `Are you sure you want to remove ${agentId}? All associated data and configurations for this agent will be purged.`,
-        type: "warning",
-        showCancelButton: true,
-        confirmButtonColor: "#DD6B55",
-        confirmButtonText: "Yes, Uninstall",
-        cancelButtonText: "Cancel"
-    }, function(confirmed) {
+    swal({ title: "Uninstall?", type: "warning", showCancelButton: true }, function(confirmed) {
         if (confirmed) {
             activeInstalls.add(agentId);
             if (btn) btn.disabled = true;
-
             aicli_csrf = getCsrf();
-            fetch(`/plugins/unraid-aicliagents/AICliAjax.php?action=uninstall_agent&agentId=${agentId}&csrf_token=${encodeURIComponent(aicli_csrf)}`)
-                .then(r => r.json())
-                .then(data => {
-                    if (data.status === 'ok') {
-                        window.location.reload();
-                    } else {
-                        activeInstalls.delete(agentId);
-                        if (btn) btn.disabled = false;
-                        swal("Uninstall Failed", (data.message || data.error), "error");
-                    }
-                })
-                .catch(err => {
-                    if (isUnloading) return;
-                    activeInstalls.delete(agentId);
-                    if (btn) btn.disabled = false;
-                    console.error(err);
-                    swal("Network Error", "Check console for details.", "error");
+            fetch('/plugins/unraid-aicliagents/AICliAjax.php?action=uninstall_agent&agentId=' + agentId + '&csrf_token=' + encodeURIComponent(aicli_csrf))
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.status === 'ok') window.location.reload();
+                    else { activeInstalls.delete(agentId); btn.disabled = false; swal("Failed", "error"); }
                 });
         }
     });
@@ -1072,230 +938,64 @@ function uninstallAgent(agentId, btn = null) {
 function saveAICliAgentsManager(form, silent = false) {
     const formData = new FormData(form);
     const params = new URLSearchParams();
-    
-    // Deduplicate aicli_csrf and other keys
-    for (const [key, value] of formData.entries()) {
-        params.set(key, value); 
-    }
-    
-    // Ensure we use the latest system aicli_csrf token if Dynamix has provided one
+    for (const pair of formData.entries()) { params.set(pair[0], pair[1]); }
     aicli_csrf = getCsrf() || formData.get('csrf_token') || '';
     params.set('csrf_token', aicli_csrf);
-    
-    // D-162: Collect all agent-specific configuration inputs outside the main form
-    document.querySelectorAll('input[name^="preview_"], input[name^="node_memory_"]').forEach(el => {
-        if (el.type === 'checkbox') {
-            params.set(el.name, el.checked ? "1" : "0");
-        } else {
-            params.set(el.name, el.value);
-        }
+    document.querySelectorAll('input[name^="preview_"], input[name^="node_memory_"]').forEach(function(el) {
+        params.set(el.name, el.type === 'checkbox' ? (el.checked ? "1" : "0") : el.value);
     });
-    
-    console.log('[AICli] Saving settings (deduplicated):', params.toString());
-
-    // D-140: Show blocking overlay if user is changing
-    const userSelect = document.getElementById('user_select');
-    const currentUser = userSelect ? userSelect.getAttribute('data-original-user') : '';
-    const newUser = params.get('user');
-    const isUserChanging = (newUser && currentUser && newUser !== currentUser);
-    
-    if (isUserChanging && typeof swal === 'function') {
-        swal({
-            title: "Switching User...",
-            text: "Syncing RAM to Flash and cloning environment. Please wait, this ensures data consistency.",
-            type: "info",
-            showConfirmButton: false,
-            closeOnConfirm: false
-        });
-    }
-
-    const performSave = (callback) => {
-        fetch(`/plugins/unraid-aicliagents/AICliAjax.php?action=save&csrf_token=${encodeURIComponent(aicli_csrf)}`, {
-            method: 'POST',
-            headers: { 
-                'Content-Type': 'application/x-www-form-urlencoded'
-            },
-            body: params.toString()
-        })
-        .then(r => {
-            if (!r.ok) {
-                return r.text().then(txt => {
-                    console.error('[AICli] Server Error (HTTP ' + r.status + '):', txt);
-                    throw new Error('Server returned ' + r.status);
-                });
-            }
-            return r.json();
-        })
-        .then(data => {
-            console.log('[AICli] Save response:', data);
-            if (data.status === 'ok') {
-                if (data.userChanged && typeof swal === 'function') swal.close();
-                if (callback) {
-                    callback();
-                } else if (!silent) {
-                    if (typeof swal === 'function') {
-                        swal({
-                            title: "Settings Saved",
-                            text: "Changes applied. Some settings may require a terminal restart. Restart now?",
-                            type: "success",
-                            showCancelButton: true,
-                            confirmButtonText: "Restart Terminal",
-                            cancelButtonText: "Later"
-                        }, function(confirmed) {
-                            if (confirmed) {
-                                fetch(`/plugins/unraid-aicliagents/AICliAjax.php?action=restart&csrf_token=${encodeURIComponent(aicli_csrf)}`)
-                                .then(() => window.location.reload());
-                            } else {
-                                window.location.reload();
-                            }
-                        });
-                    } else {
-                        window.location.reload();
-                    }
-                } else if (silent) {
-                    window.location.reload();
-                }
-            } else {
-                if (typeof swal === 'function') swal.close();
-                swal("Save Failed", (data.message || 'Unknown error'), "error");
-            }
-        })
-        .catch(err => {
-            console.error("[AICli] Save Error:", err);
-            swal("Network Error", "Settings failed to save. See console for details.", "error");
-        });
-    };
-
-    performSave();
+    fetch('/plugins/unraid-aicliagents/AICliAjax.php?action=save&csrf_token=' + encodeURIComponent(aicli_csrf), {
+        method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: params.toString()
+    }).then(function(r) { return r.json(); }).then(function(data) {
+        if (data.status === 'ok') window.location.reload();
+    });
 }
 
-// Auto-check for updates on page load
-
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', function() {
     aicli_csrf = getCsrf();
-    // Check for any ongoing installs across all agents
-    document.querySelectorAll('.agent-actions').forEach(container => {
+    document.querySelectorAll('.agent-actions').forEach(function(container) {
         const id = container.id.replace('actions-', '');
         if (!id) return;
-        
-        fetch(`/plugins/unraid-aicliagents/AICliAjax.php?action=get_install_status&agentId=${id}&csrf_token=${encodeURIComponent(aicli_csrf)}`)
-            .then(r => r.json())
-            .then(data => {
+        fetch('/plugins/unraid-aicliagents/AICliAjax.php?action=get_install_status&agentId=' + id + '&csrf_token=' + encodeURIComponent(aicli_csrf))
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
                 if (data && data.progress > 0 && data.progress < 100) {
-                    const status = document.getElementById('status-' + id);
-                    const progress = document.getElementById('progress-' + id);
-                    const bar = document.getElementById('bar-' + id);
-                    const text = document.getElementById('text-' + id);
-                    
-                    if (status && progress && bar) {
-                        activeInstalls.add(id);
-                        status.innerHTML = '<i class="fa fa-circle-o-notch fa-spin"></i> Resuming...';
-                        progress.style.display = 'block';
-                        bar.style.width = data.progress + '%';
-                        if (text) text.innerText = data.message || 'Resuming...';
-                        
-                        if (progressTimers[id]) clearInterval(progressTimers[id]);
-                        progressTimers[id] = setInterval(() => pollInstallStatus(id), 800);
-                    }
+                    activeInstalls.add(id);
+                    document.getElementById('progress-' + id).style.display = 'block';
+                    progressTimers[id] = setInterval(function() { pollInstallStatus(id); }, 800);
                 }
             });
     });
-
     setTimeout(checkUpdates, 1000);
     setTimeout(refreshStorageStatus, 500);
 });
 
 function executeStorageMigration() {
     const current = '<?=$config['persistence_base']?>';
-    const pathInput = document.getElementById('new_storage_path');
-    const newPath = pathInput ? pathInput.value : '';
+    const newPath = document.getElementById('new_storage_path').value;
     const csrf = getCsrf();
-    
-    if (!newPath || newPath === current) {
-        if (typeof swal === 'function') swal("Skip", "Path is unchanged.", "info");
-        return;
-    }
-    
-    if (!newPath.startsWith('/mnt/') && !newPath.startsWith('/boot/')) {
-        if (typeof swal === 'function') swal("Invalid Path", "Path must start with /mnt/ or /boot/", "error");
-        return;
-    }
-    
-    if (typeof swal !== 'function') return;
-
-    swal({
-        title: "Confirm Migration",
-        text: `Move permanent data from\n${current}\nto\n${newPath}?`,
-        type: "warning",
-        showCancelButton: true,
-        confirmButtonText: "Migrate",
-        closeOnConfirm: false,
-        showLoaderOnConfirm: true
-    }, function() {
-        fetch(`/plugins/unraid-aicliagents/AICliAjax.php?action=migrate_storage&path=${encodeURIComponent(newPath)}&csrf_token=${encodeURIComponent(csrf)}`)
-            .then(r => r.json())
-            .then(data => {
-                if (data.status === 'ok') {
-                    swal({
-                        title: "Migration Complete",
-                        text: "Your persistence data has been moved. The page will now reload.",
-                        type: "success"
-                    }, () => window.location.reload());
-                } else {
-                    swal("Migration Failed", data.message || "Unknown error during move.", "error");
-                }
-            })
-            .catch(e => {
-                swal("Network Error", e.message, "error");
-            });
+    swal({ title: "Migrate?", type: "warning", showCancelButton: true }, function() {
+        fetch('/plugins/unraid-aicliagents/AICliAjax.php?action=migrate_storage&path=' + encodeURIComponent(newPath) + '&csrf_token=' + encodeURIComponent(csrf))
+            .then(function(r) { return r.json(); }).then(function(data) { window.location.reload(); });
     });
-
 }
 
 function executeRepair() {
-    if (typeof swal !== 'function') return;
-    
-    swal({
-        title: "Repair Plugin?",
-        text: "This will restore storage, fix mounts, and re-install all agent binaries. \n\nExisting workspace sessions will be preserved.",
-        type: "warning",
-        showCancelButton: true,
-        confirmButtonText: "Start Repair",
-        closeOnConfirm: false
-    }, function(confirmed) {
+    swal({ title: "Repair?", type: "warning", showCancelButton: true }, function(confirmed) {
         if (!confirmed) return;
-        
         const csrf = getCsrf();
-        fetch(`/plugins/unraid-aicliagents/AICliAjax.php?action=repair_plugin&csrf_token=${encodeURIComponent(csrf)}`)
-            .then(r => r.json())
-            .then(data => {
+        fetch('/plugins/unraid-aicliagents/AICliAjax.php?action=repair_plugin&csrf_token=' + encodeURIComponent(csrf))
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
                 if (data.status === 'ok') {
-                    // Show Progress Overlay
-                    swal({
-                        title: "Repairing System",
-                        text: '<div style="margin-top:15px;"><div id="repair-msg" style="font-weight:bold; margin-bottom:8px; font-size:0.9em;">Initializing...</div><div style="height:20px; background:#333; border-radius:4px; overflow:hidden;"><div id="repair-bar" style="height:100%; width:5%; background:#ff8c00; transition: width 0.4s ease;"></div></div></div>',
-                        html: true,
-                        showConfirmButton: false
-                    });
-                    
-                    // Poll for progress
-                    let pollCount = 0;
-                    const poller = setInterval(() => {
-                        fetch(`/plugins/unraid-aicliagents/AICliAjax.php?action=get_repair_status&csrf_token=${encodeURIComponent(csrf)}`)
-                            .then(r => r.json())
-                            .then(status => {
-                                pollCount++;
-                                const bar = document.getElementById('repair-bar');
-                                const msg = document.getElementById('repair-msg');
-                                
-                                if (bar) bar.style.width = status.progress + '%';
-                                if (msg) msg.innerText = status.message || 'Processing...';
-
-                                if (status.progress === 100 || pollCount > 120) {
-                                    clearInterval(poller);
-                                    msg.innerText = "Repair Successful!";
-                                    setTimeout(() => window.location.reload(), 1500);
-                                }
+                    swal({ title: "Repairing...", text: '<div id="repair-msg">Initializing...</div><div id="repair-bar" style="width:5%; height:10px; background:#ff8c00;"></div>', html: true, showConfirmButton: false });
+                    const poller = setInterval(function() {
+                        fetch('/plugins/unraid-aicliagents/AICliAjax.php?action=get_repair_status&csrf_token=' + encodeURIComponent(csrf))
+                            .then(function(r) { return r.json(); })
+                            .then(function(status) {
+                                document.getElementById('repair-bar').style.width = status.progress + '%';
+                                document.getElementById('repair-msg').innerText = status.message;
+                                if (status.progress >= 100) { clearInterval(poller); window.location.reload(); }
                             });
                     }, 1000);
                 }
@@ -1303,265 +1003,150 @@ function executeRepair() {
     });
 }
 
-function executeStorageMigration() {
+function executeAgentStorageMigration() {
     const current = '<?=$config['agent_storage_path'] ?? '/boot/config/plugins/unraid-aicliagents'?>';
-    const pathInput = document.getElementById('agent_storage_path');
-    const newPath = pathInput ? pathInput.value : '';
+    const newPath = document.getElementById('agent_storage_path').value;
     const csrf = getCsrf();
-    
-    if (!newPath || newPath === current) return;
-    if (!newPath.startsWith('/mnt/') && !newPath.startsWith('/boot/')) return;
-    if (typeof swal !== 'function') return;
-
-    swal({
-        title: "Confirm Agent Migration",
-        text: `Move Agent binary storage from\n${current}\nto\n${newPath}?\n\nThis will temporarily unmount agents.`,
-        type: "warning",
-        showCancelButton: true,
-        confirmButtonText: "Migrate Agents",
-        closeOnConfirm: false,
-        showLoaderOnConfirm: true
-    }, function() {
-        fetch(`/plugins/unraid-aicliagents/AICliAjax.php?action=migrate_agent_storage&path=${encodeURIComponent(newPath)}&csrf_token=${encodeURIComponent(csrf)}`)
-            .then(r => r.json())
-            .then(data => {
-                if (data.status === 'ok') {
-                    swal({
-                        title: "Agent Migration Complete",
-                        text: "Agent binary storage has been moved and remounted.",
-                        type: "success"
-                    }, () => window.location.reload());
-                } else {
-                    swal("Migration Failed", data.message || "Unknown error.", "error");
-                }
-            })
-            .catch(e => {
-                swal("Network Error", e.message, "error");
-            });
+    swal({ title: "Migrate Agents?", type: "warning", showCancelButton: true }, function() {
+        fetch('/plugins/unraid-aicliagents/AICliAjax.php?action=migrate_agent_storage&path=' + encodeURIComponent(newPath) + '&csrf_token=' + encodeURIComponent(csrf))
+            .then(function(r) { return r.json(); }).then(function(data) { window.location.reload(); });
     });
 }
 
 function toggleMigrateBtn(inputId, btnId, originalValue) {
     const input = document.getElementById(inputId);
     const btn = document.getElementById(btnId);
-    if (!input || !btn) return;
-    
-    const isChanged = (input.value !== originalValue && input.value !== '');
-    btn.disabled = !isChanged;
-    if (isChanged) {
-        btn.style.opacity = '1';
-        btn.style.cursor = 'pointer';
-    } else {
-        btn.style.opacity = '0.5';
-        btn.style.cursor = 'not-allowed';
-    }
+    btn.disabled = (input.value === originalValue || input.value === '');
 }
 
 function refreshStorageStatus() {
     const csrf = getCsrf();
-    fetch(`/plugins/unraid-aicliagents/AICliAjax.php?action=get_storage_status&csrf_token=${encodeURIComponent(csrf)}`)
-        .then(r => r.json())
-        .then(data => {
-            const loading = document.getElementById('storage-status-loading');
-            const active = document.getElementById('storage-status-active');
+    fetch('/plugins/unraid-aicliagents/AICliAjax.php?action=get_storage_status&csrf_token=' + encodeURIComponent(csrf))
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
             if (data.status === 'mounted') {
-                if (loading) loading.style.display = 'none';
-                if (active) active.style.display = 'flex';
+                document.getElementById('storage-status-loading').style.display = 'none';
+                document.getElementById('storage-status-active').style.display = 'flex';
+                document.getElementById('storage-usage-text').innerText = data.used_mb + 'MB / ' + data.total_mb + 'MB';
+                document.getElementById('storage-usage-bar').style.width = Math.min(100, Math.round((data.used_mb / data.total_mb) * 100)) + '%';
                 
-                const used = data.used_mb || 0;
-                const logicalUsed = data.logical_used_mb || 0;
-                const total = data.total_mb || 2048;
-                const pct = Math.min(100, Math.round((used / total) * 100));
-                const lpct = data.logical_pct || 0;
-                
-                const text = document.getElementById('storage-usage-text');
-                const bar = document.getElementById('storage-usage-bar');
-                const lbar = document.getElementById('storage-logical-bar');
-                const headroom = document.getElementById('flash-headroom-text');
-                const btn = document.getElementById('btn-expand-storage');
-                
-                // D-126: Support both '1.5x (60%)' from compsize or fallback formats
-                let ratioStr = data.compression_ratio || '1.0x';
-                if (!ratioStr.includes('x')) {
-                    const ratioVal = parseInt(ratioStr);
-                    ratioStr = (isNaN(ratioVal) || ratioVal >= 100 || ratioVal <= 0) ? '1.0x' : (Math.round((100 / ratioVal) * 10) / 10).toFixed(1) + 'x';
-                }
-                
-                const ratioLabel = ` | ${ratioStr}`;
-                const imgSizeStr = data.disk_size_mb ? ` [Disk: ${data.disk_size_mb}MB]` : '';
-                const available = data.available_mb || 0;
-                const effective = data.effective_available_mb || data.available_mb;
-                const freeLabel = effective > 1024 ? (effective / 1024).toFixed(1) + 'GB' : effective + 'MB';
-                const freeSuffix = effective !== available ? ' Free (Effective)' : ' Free';
-
-                const logLabel = logicalUsed > 1024 ? (logicalUsed / 1024).toFixed(1) + 'GB' : logicalUsed + 'MB';
-                const physLabel = used > 1024 ? (used / 1024).toFixed(1) + 'GB' : used + 'MB';
-                const capacityLabel = total > 1024 ? (total / 1024).toFixed(1) + 'GB' : total + 'MB';
-                const diskLabel = data.file_size_mb > 1024 ? (data.file_size_mb / 1024).toFixed(1) + 'GB' : data.file_size_mb + 'MB';
-                const roBadge = data.is_read_only ? ' <span class="aicli-pill-btn" style="background:#444; cursor:default; padding:1px 6px; font-size:0.8em; margin-left:5px; box-shadow:none; text-transform:none;" title="Storage is mounted Read-Only for protection">READ-ONLY</span>' : '';
-
-                if (text) {
-                    text.innerHTML = `Contents: <span title="Uncompressed logical data size">${logLabel}</span>:<span title="Physical space used on disk">${physLabel}</span> <span style="opacity:0.6; font-size:0.9em;">(actual:comp)</span> Disk: <span title="Image File Size on Flash/Cache">${diskLabel}</span>${roBadge}`;
-                }
-                if (bar) {
-                    bar.style.width = pct + '%';
-                    bar.style.background = pct > 90 ? '#cc0000' : (pct > 75 ? '#ff8c00' : '#81b300');
-                }
-                if (lbar) {
-                    lbar.style.width = lpct + '%';
-                }
-
-                // D-126: Update Rootfs (RAM Disk) stats on settings page
-                if (data.rootfs_usage_percent !== undefined) {
-                    const rText = document.getElementById('rootfs-usage-text');
-                    const rBar = document.getElementById('rootfs-usage-bar');
-                    const rWarn = document.getElementById('rootfs-warn-icon');
-                    const rPct = data.rootfs_usage_percent;
-                    
-                    if (rText) rText.innerText = `${rPct}% Used (${data.rootfs_free_mb}MB Free)`;
-                    if (rBar) {
-                        rBar.style.width = rPct + '%';
-                        rBar.style.background = rPct > 85 ? '#f87171' : (rPct > 60 ? '#fbbf24' : '#34d399');
+                // D-160: Show Read-Only / Read-Write label
+                const roLabel = document.getElementById('storage-ro-label');
+                if (roLabel) {
+                    if (data.is_read_only) {
+                        roLabel.innerText = 'READ-ONLY';
+                        roLabel.style.background = '#3a87ad';
+                        roLabel.style.display = 'inline-block';
+                    } else if (data.write_protect_agents) {
+                        roLabel.innerText = 'READ-WRITE';
+                        roLabel.style.background = '#86b32d';
+                        roLabel.style.display = 'inline-block';
+                    } else {
+                        roLabel.style.display = 'none';
                     }
-                    if (rWarn) rWarn.style.display = data.rootfs_warning ? 'inline-block' : 'none';
-                }
-                
-                if (btn) {
-                    const isDisabled = data.flash_headroom_mb < 150;
-                    btn.style.opacity = isDisabled ? '0.5' : '1';
-                    btn.style.cursor = isDisabled ? 'not-allowed' : 'pointer';
-                    btn.title = isDisabled ? 'Insufficient Flash space to expand' : 'Increase image size by 500MB';
                 }
 
-                // Render Home Storage Blocks
+                // D-170: Update Rootfs (RAM Disk) usage
+                const rootfsText = document.getElementById('rootfs-usage-text');
+                if (rootfsText) {
+                    rootfsText.innerText = data.rootfs_usage_percent + '% Used (' + data.rootfs_free_mb + 'MB Free)';
+                }
+                const rootfsBar = document.getElementById('rootfs-usage-bar');
+                if (rootfsBar) {
+                    rootfsBar.style.width = data.rootfs_usage_percent + '%';
+                    // Dynamic coloring based on usage
+                    if (data.rootfs_usage_percent > 85) rootfsBar.style.background = '#f87171';
+                    else if (data.rootfs_usage_percent > 60) rootfsBar.style.background = '#fbbf24';
+                    else rootfsBar.style.background = '#34d399';
+                }
+                const rootfsWarn = document.getElementById('rootfs-warn-icon');
+                if (rootfsWarn) {
+                    rootfsWarn.style.display = data.rootfs_warning ? 'inline-block' : 'none';
+                }
+
                 if (data.home_stats) {
-                    const homeContainer = document.getElementById('home_storage_container');
                     let html = '';
                     for (const user in data.home_stats) {
-                        const stats = data.home_stats[user];
-                        const hpct = stats.percent;
-                        const hbg = hpct > 90 ? '#cc0000' : (hpct > 75 ? '#ff8c00' : '#86b32d');
-                        const hLogLabel = stats.logical_used_mb > 1024 ? (stats.logical_used_mb / 1024).toFixed(1) + 'GB' : stats.logical_used_mb + 'MB';
-                        const hPhysLabel = stats.used_mb > 1024 ? (stats.used_mb / 1024).toFixed(1) + 'GB' : stats.used_mb + 'MB';
-                        const hDiskLabel = stats.disk_size_mb > 1024 ? (stats.disk_size_mb / 1024).toFixed(1) + 'GB' : stats.disk_size_mb + 'MB';
-
-                        html += `
-                            <div class="aicli-info-row">
-                                <div class="aicli-info-label">Home: <b>${user}</b></div>
-                                <div class="aicli-info-value" style="font-size:0.9em;">
-                                    <div style="display:flex; flex-direction:column; gap:4px; width:100%;">
-                                        <div style="display:flex; justify-content:space-between; align-items:center;">
-                                            <code title="Logical: ${stats.logical_used_mb}MB, Physical: ${stats.used_mb}MB, Capacity: ${stats.total_mb}MB">Contents: ${hLogLabel}:${hPhysLabel} <span style="opacity:0.6; font-size:0.9em;">(actual:comp)</span> Disk: ${hDiskLabel}</code>
-                                            <div class="aicli-info-btns">
-                                                <span onclick="shrinkStorage('${user}')" class="aicli-pill-btn danger" title="Decrease image size by 128MB">-128MB</span>
-                                                <span onclick="expandStorage('${user}')" class="aicli-pill-btn" title="Increase image size by 128MB">+128MB</span>
-                                            </div>
-                                        </div>
-                                        <div style="height:6px; background:#333; border-radius:3px; overflow:hidden; position:relative;">
-                                            <div style="height:100%; width:${stats.logical_pct}%; background:rgba(255,255,255,0.1); position:absolute; top:0; left:0; transition: width 0.4s ease;"></div>
-                                            <div style="height:100%; width:${hpct}%; background:${hbg}; position:absolute; top:0; left:0; transition: width 0.4s ease;"></div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        `;
+                        const s = data.home_stats[user];
+                        const pct = Math.min(100, Math.round((s.used_mb / s.total_mb) * 100));
+                        html += '<div class="aicli-info-row" style="margin-top: 10px;">' +
+                                '<div class="aicli-info-label">Home: ' + user + '</div>' +
+                                '<div class="aicli-info-value" style="flex-direction: column; align-items: flex-start; gap: 4px;">' +
+                                    '<div style="display:flex; justify-content:space-between; align-items:center; width:100%;">' +
+                                        '<code>' + s.used_mb + 'MB / ' + s.total_mb + 'MB</code>' +
+                                        '<div class="aicli-info-btns">' +
+                                            '<span onclick="repairHomeStorage(\'' + user + '\', this)" class="aicli-pill-btn warning" title="Repair Home: Fix mount issues if storage becomes Read-Only">Repair</span>' +
+                                            '<span onclick="shrinkStorage(\'home_' + user + '\', this)" class="aicli-pill-btn danger" title="Optimize storage: Shrink to minimum safe size">Shrink</span>' +
+                                            '<span onclick="expandStorage(\'home_' + user + '\', null, this)" class="aicli-pill-btn" title="Increase image size by 128MB">+128MB</span>' +
+                                        '</div>' +
+                                    '</div>' +
+                                    '<div style="height:6px; background:#333; border-radius:3px; overflow:hidden; width:100%;">' +
+                                        '<div style="height:100%; width:' + pct + '%; background:#86b32d; transition: width 0.4s ease;"></div>' +
+                                    '</div>' +
+                                '</div>' +
+                            '</div>';
                     }
-                    if (homeContainer) {
-                        html += `
-                            <div style="font-size: 11px; opacity: 0.5; margin-top: 15px; font-style: italic; border-top: 1px solid var(--border-color, #ccc); padding-top: 10px;">
-                                * Disk usage reflects physical space consumed after Btrfs snapshots. FAT32 Flash drives do not support sparse files (Full Allocation); for maximum efficiency, move storage to an Array/Cache disk (XFS/Btrfs/ZFS).
-                            </div>
-                        `;
-                        homeContainer.innerHTML = html;
-                    }
+                    document.getElementById('home_storage_container').innerHTML = html;
                 }
-            } else {
-                if (loading) loading.innerText = 'Storage Status: ' + (data.status || 'Unknown');
             }
         });
 }
 
-function shrinkStorage(target = 'agents') {
-    if (typeof swal !== 'function') return;
-    
-    const inc = target === 'agents' ? '256MB' : '128MB';
-    swal({
-        title: "Shrink Storage?",
-        text: "This will reduce the capacity of the " + target + " Btrfs image by " + inc + ". Ensure there is free space inside before continuing.",
-        type: "warning",
+function shrinkStorage(target = 'agents', btn = null) {
+    swal({ 
+        title: "Optimize Storage?", 
+        text: "This will shrink the storage container to the smallest safe size (Contents + 128MB headroom). Are you sure?", 
+        type: "warning", 
         showCancelButton: true,
-        confirmButtonText: "Shrink Now",
-        closeOnConfirm: false,
-        showLoaderOnConfirm: true
-    }, function() {
+        showLoaderOnConfirm: true,
+        closeOnConfirm: false
+    }, function(isConfirm) {
+        if (!isConfirm) return;
         const csrf = getCsrf();
-        fetch(`/plugins/unraid-aicliagents/AICliAjax.php?action=shrink_storage&type=${encodeURIComponent(target)}&csrf_token=${encodeURIComponent(csrf)}`)
-            .then(r => r.json())
-            .then(data => {
-                if (data.status === 'ok') {
-                    swal("Shrunk!", "Storage size decreased.", "success");
-                    refreshStorageStatus();
+        fetch('/plugins/unraid-aicliagents/AICliAjax.php?action=shrink_storage&type=' + encodeURIComponent(target) + '&csrf_token=' + encodeURIComponent(csrf))
+            .then(function(r) { return r.json(); })
+            .then(function(data) { 
+                if (data.status === 'error') {
+                    swal("Error", data.message || "Failed to shrink storage.", "error");
                 } else {
-                    swal("Failed", data.message || "Failed to shrink. Clean unused data first.", "error");
+                    swal("Shrink Complete", data.message || "Storage optimized successfully.", "success");
+                    refreshStorageStatus(); 
                 }
             })
-            .catch(() => {
-                swal("Error", "Network error.", "error");
+            .catch(function() {
+                swal("Error", "Network error occurred while shrinking storage.", "error");
             });
     });
 }
 
-function expandStorage(target = 'agents', callback = null) {
-    console.log(`[AICli] Initiating expandStorage for: ${target}`);
-    
-    if (typeof swal !== 'function') return;
-    
-    const showLoading = !callback; // If we have a callback, the caller likely shows its own UI
-    
-    const executeExpansion = () => {
+function expandStorage(target = 'agents', callback = null, btn = null) {
+    const size = target === 'agents' ? '256MB' : '128MB';
+    swal({ 
+        title: "Expand Storage?", 
+        text: "Increase storage capacity by " + size + "?", 
+        type: "info", 
+        showCancelButton: true,
+        showLoaderOnConfirm: true,
+        closeOnConfirm: false
+    }, function(isConfirm) {
+        if (!isConfirm) return;
         const csrf = getCsrf();
-        fetch(`/plugins/unraid-aicliagents/AICliAjax.php?action=expand_storage&type=${encodeURIComponent(target)}&csrf_token=${encodeURIComponent(csrf)}`)
-            .then(r => r.json())
-            .then(data => {
-                if (data.status === 'ok') {
-                    if (callback) {
-                        callback();
-                    } else {
-                        const inc = target === 'agents' ? '256MB' : '128MB';
-                        swal("Expanded!", "Storage container logical size increased by " + inc + ".", "success");
-                    }
-                    refreshStorageStatus();
+        fetch('/plugins/unraid-aicliagents/AICliAjax.php?action=expand_storage&type=' + encodeURIComponent(target) + '&csrf_token=' + encodeURIComponent(csrf))
+            .then(function(r) { return r.json(); })
+            .then(function(data) { 
+                if (data.status === 'error') {
+                    swal("Error", data.message || "Failed to expand storage.", "error");
                 } else {
-                    swal("Failed", data.message || "Manual expansion failed. Check Flash space.", "error");
+                    swal("Expand Complete", "Storage capacity increased by " + size, "success");
+                    if (callback) callback(); 
+                    refreshStorageStatus(); 
                 }
             })
-            .catch(() => {
-                swal("Network Error", "Could not reach the server.", "error");
+            .catch(function() {
+                swal("Error", "Network error occurred while expanding storage.", "error");
             });
-    };
-
-    if (callback) {
-        // No confirmation needed if triggered from a larger flow (like install recovery)
-        executeExpansion();
-    } else {
-        const inc = target === 'agents' ? '256MB' : '128MB';
-        swal({
-            title: "Expand Storage?",
-            text: "This will increase the capacity of the " + target + " Btrfs image by " + inc + ". This is nearly instant.",
-            type: "info",
-            showCancelButton: true,
-            confirmButtonText: "Expand Now",
-            closeOnConfirm: false,
-            showLoaderOnConfirm: true
-        }, function() {
-            executeExpansion();
-        });
-    }
+    });
 }
 
-// D-88: Auto-refresh storage stats every 5 seconds while page is open
-let storageInterval = setInterval(refreshStorageStatus, 5000);
-
-// Close on unload
-window.addEventListener('beforeunload', () => clearInterval(storageInterval));
+setInterval(refreshStorageStatus, 3000); // D-170: Snappier refresh (3s)
 </script>

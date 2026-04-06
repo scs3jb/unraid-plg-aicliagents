@@ -48,7 +48,9 @@ if (isset(\$config['enable_tab'])) {
     echo '  [>] Syncing menu visibility...' . PHP_EOL;
     updateAICliMenuVisibility(\$config['enable_tab']);
 }
+echo '  [>] Boot Resurrection: Pre-loading Agent Storage & User Homes...' . PHP_EOL;
+aicli_boot_resurrection();
 echo '  [>] Finalizing configuration...' . PHP_EOL;
 saveAICliConfig(['version' => '$VERSION']);
 "
-ok "PHP migrations complete. Plugin config updated to v$VERSION."
+ok "PHP migrations and Boot Resurrection complete. Plugin config updated to v$VERSION."

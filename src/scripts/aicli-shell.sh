@@ -138,7 +138,9 @@ while true; do
     fi
 
     # D-49: Minimalist launch logic (Safe Execution with Fallback)
-    if [ -n "$frozen_chat_id" ] && [ "$frozen_chat_id" != "none" ]; then
+    if [ "$AGENT_ID" == "terminal" ]; then
+        /bin/bash
+    elif [ -n "$frozen_chat_id" ] && [ "$frozen_chat_id" != "none" ]; then
         FINAL_CMD="${frozen_resume_cmd//\{chatId\}/$frozen_chat_id}"
         cmd_args=($FINAL_CMD)
         latest_args=($frozen_resume_latest)
@@ -151,6 +153,7 @@ while true; do
         # Attempt Latest -> Fallback to Fresh
         "${latest_args[@]}" || "${bin_args[@]}"
     fi
+    if [ "$AGENT_ID" == "terminal" ]; then exit 0; fi
     echo -e "\n\033[1;33m[Agent Exited]\033[0m Press ENTER to reload..."
     read -t 3 -r
 done

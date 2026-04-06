@@ -1,8 +1,14 @@
 <?xml version='1.0' standalone='yes'?>
 
-<PLUGIN name="unraid-aicliagents" author="John White" version="2026.04.04.05" launch="Settings/AICliAgentsManager" pluginURL="https://raw.githubusercontent.com/johnpwhite/unraid-plg-aicliagents/main/unraid-aicliagents.plg" min="7.2.0" icon="assets/icons/google-gemini.png">
+<PLUGIN name="unraid-aicliagents" author="John White" version="2026.04.06.54" launch="Settings/AICliAgentsManager" pluginURL="https://raw.githubusercontent.com/johnpwhite/unraid-plg-aicliagents/main/unraid-aicliagents.plg" min="7.2.0" icon="assets/icons/google-gemini.png">
 
 <CHANGES>
+## 2026.04.06.54
+- Feat: Ready-Now Workspace Performance - Implemented 'Boot-time Resurrection' which proactively pre-loads all AI agent binaries and user home RAM volumes during system startup or installation. This eliminates the restoration delay previously encountered on first use.
+- Improve: Btrfs Storage Resilience - Hardened the agent storage lifecycle with mandatory auto-mounting and namespace verification, ensuring reliable binary availability even after unexpected system reboots.
+- Improve: UI Initialization Feedback - Added a descriptive 'Restoring Home Storage' overlay to the terminal interface to provide users with visual status during the first background restoration of persistent data to RAM.
+- Fix: Loopback Image Stability - Optimized the Btrfs storage floor and headroom constraints to prevent 'No space left' (ENOSPC) errors during image resizing, and ensured storage locks are correctly enforced after maintenance cycles.
+
 ## 2026.04.04.05
 - Improve: Storage Intelligence - Implemented advanced Btrfs management including tail-block evacuation for reliable image shrinking, intelligent expansion guards to protect Flash drive headroom, and automated self-healing for corrupted loopback images.
 - Improve: UI &amp; UX Refinement - Redesigned the Agent Store and configuration drawers with a high-density layout, improved spacing, and automated drawer management for a smoother workspace transition.
@@ -87,6 +93,9 @@
 <FILE Name="/tmp/aicli-repair.sh">
 <URL>https://raw.githubusercontent.com/johnpwhite/unraid-plg-aicliagents/main/src/scripts/user/repair-plugin.sh</URL>
 </FILE>
+<FILE Name="/tmp/aicli-stop.sh">
+<URL>https://raw.githubusercontent.com/johnpwhite/unraid-plg-aicliagents/main/src/scripts/user/stop-plugin.sh</URL>
+</FILE>
 <FILE Name="/tmp/aicli-stop-warning.page">
 <URL>https://raw.githubusercontent.com/johnpwhite/unraid-plg-aicliagents/main/src/ArrayStopWarning.page</URL>
 </FILE>
@@ -97,7 +106,7 @@
 #!/bin/bash
 # AICliAgents Modular Installer Engine
 export NAME="unraid-aicliagents"
-export VERSION="2026.04.04.05"
+export VERSION="2026.04.06.54"
 export GIT_URL="https://raw.githubusercontent.com/johnpwhite/unraid-plg-aicliagents/main"
 export EMHTTP_DEST="/usr/local/emhttp/plugins/unraid-aicliagents"
 export CONFIG_DIR="/boot/config/plugins/unraid-aicliagents"
@@ -148,6 +157,7 @@ status "  [1/5] System Preparation"
 status "-----------------------------------------------------------------"
 mkdir -p "$EMHTTP_DEST/scripts/user"
 mv /tmp/aicli-repair.sh "$EMHTTP_DEST/scripts/user/repair-plugin.sh"
+mv /tmp/aicli-stop.sh "$EMHTTP_DEST/scripts/user/stop-plugin.sh"
 mv /tmp/aicli-stop-warning.page "$EMHTTP_DEST/ArrayStopWarning.page"
 ok "Manifest deployed. Directories ready."
 
