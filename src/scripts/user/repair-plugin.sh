@@ -79,7 +79,7 @@ mkdir -p "$(dirname "$MOUNT_LOCK")"
 
 # 3. Native Runtime Restoration
 log_progress 40 "Restoring Node.js and system symlinks..."
-bash /usr/local/emhttp/plugins/unraid-aicliagents/scripts/installer/runtime.sh >/dev/null 2>&1
+bash /usr/local/emhttp/plugins/unraid-aicliagents/src/scripts/installer/runtime.sh >/dev/null 2>&1
 
 # 4. Agent Re-Installation
 log_progress 50 "Re-synchronizing AI Agent binaries..."
@@ -99,7 +99,7 @@ if [ "$TOTAL" -gt 0 ]; then
         # Map progress from 50 to 90
         CURRENT_PCT=$((50 + (COUNT * 40 / TOTAL)))
         log_progress "$CURRENT_PCT" "Re-installing: $agent..."
-        /usr/bin/php /usr/local/emhttp/plugins/unraid-aicliagents/scripts/install-bg.php "$agent" --repair >/dev/null 2>&1
+        /usr/bin/php /usr/local/emhttp/plugins/unraid-aicliagents/src/scripts/install-bg.php "$agent" --repair >/dev/null 2>&1
     done
 else
     log_progress 90 "No previously installed agents found. Skipping re-deploy."

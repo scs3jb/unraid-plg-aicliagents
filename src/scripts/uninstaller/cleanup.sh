@@ -1,32 +1,46 @@
 #!/bin/bash
 # AICliAgents Uninstaller: Clean Removal of Assets & Processes
-# v2026.03.17.15 - Aggressive Ghost Hunting
 
-status "Aggressively hunting for legacy AI CLI Agents processes..."
+# Graceful process termination: SIGTERM first, wait, then SIGKILL if needed
+graceful_kill() {
+    local pattern="$1"
+    local pids
+    pids=$(pgrep -f "$pattern" 2>/dev/null | grep -v "$$" || true)
+    if [ -n "$pids" ]; then
+        echo "$pids" | xargs -r kill -15 > /dev/null 2>&1 || true
+        sleep 2
+        pids=$(pgrep -f "$pattern" 2>/dev/null | grep -v "$$" || true)
+        if [ -n "$pids" ]; then
+            echo "$pids" | xargs -r kill -9 > /dev/null 2>&1 || true
+        fi
+    fi
+}
 
-# 1. Kill standalone sync daemons
-status "Terminating standalone sync daemons..."
-pkill -9 -f "sync-daemon-.*\.sh" || true
+log_status "Terminating AI CLI Agents processes..."
 
-# 2. Kill detached background sync subshells (The 'Ghost' sources)
-status "Terminating detached background heartbeat loops..."
-pkill -9 -f "Periodic sync triggered" || true
+# 1. Terminate standalone sync daemons
+log_status "Terminating standalone sync daemons..."
+graceful_kill "sync-daemon-.*\.sh"
 
-# 3. Kill all ttyd processes managing aicli sockets
-status "Terminating ttyd listeners..."
-pgrep -f "ttyd.*(aicliterm|geminiterm)-" | xargs kill -9 > /dev/null 2>&1 || true
+# 2. Terminate detached background sync subshells
+log_status "Terminating detached background heartbeat loops..."
+graceful_kill "Periodic sync triggered"
 
-# 4. Kill all AICli tmux sessions
-status "Terminating tmux agent sessions..."
+# 3. Terminate all ttyd processes managing aicli sockets
+log_status "Terminating ttyd listeners..."
+graceful_kill "ttyd.*(aicliterm|geminiterm)-"
+
+# 4. Terminate all AICli tmux sessions
+log_status "Terminating tmux agent sessions..."
 if command -v tmux >/dev/null 2>&1; then
     tmux ls -F '#S' 2>/dev/null | grep -E "^aicli-agent-" | xargs -I {} tmux kill-session -t "{}" > /dev/null 2>&1 || true
 fi
 
-# 5. Kill orphaned agent node processes
-status "Terminating orphaned node binaries..."
-pgrep -f "node.*(gemini|opencode|nanocoder|claude|kilo|pi|codex|factory)" | xargs kill -9 > /dev/null 2>&1 || true
+# 5. Terminate orphaned agent node processes
+log_status "Terminating orphaned node binaries..."
+graceful_kill "node.*(gemini|opencode|nanocoder|claude|kilo|pi|codex|factory)"
 
-status "Cleaning up runtime files and locks..."
+log_status "Cleaning up runtime files and locks..."
 rm -f /var/run/aicliterm-*.sock
 rm -f /var/run/unraid-aicliagents-*.pid
 rm -f /var/run/unraid-aicliagents-*.lock
@@ -39,4 +53,4 @@ rm -rf /tmp/unraid-aicliagents
 rm -f /tmp/ttyd-aicli-*.log
 rm -f /tmp/unraid-aicliagents/sync-daemon-*.sh
 
-status "Removal of runtime assets complete."
+log_status "Removal of runtime assets complete."

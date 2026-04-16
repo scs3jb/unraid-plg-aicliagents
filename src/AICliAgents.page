@@ -3,8 +3,14 @@ Title="AI CLI Agents"
 Icon="assets/icons/google-gemini.png"
 ---
 <?php
-require_once '/usr/local/emhttp/plugins/unraid-aicliagents/includes/AICliAgentsManager.php';
-aicli_ensure_init();
+/**
+ * <module_context>
+ * Description: Primary Terminal view for AICliAgents plugin.
+ * Dependencies: AICliAgentsManager.php, TerminalStyles, UploadOverlay, TerminalScripts.
+ * </module_context>
+ */
+require_once '/usr/local/emhttp/plugins/unraid-aicliagents/src/includes/AICliAgentsManager.php';
+aicli_ensure_init(true);
 
 $config = getAICliConfig();
 if ($config['enable_tab'] !== '1') {
@@ -12,122 +18,27 @@ if ($config['enable_tab'] !== '1') {
     return;
 }
 
-$version = "2026.04.06.31";
+$version = \AICliAgents\Services\ConfigService::getVersion();
 $var = @parse_ini_file("/var/local/emhttp/var.ini");
 $csrf_token = $var['csrf_token'] ?? '';
-?>
 
-<style>
-html, body, #displaybox, #sb-body, #sb-container, .gemini-ui, main, #main-content, #aicliagents-root, .main-section, .main-row, #form {
-    overflow: hidden !important; overflow-y: hidden !important; overflow-x: hidden !important; overflow: clip !important;
-    scrollbar-width: none !important; -ms-overflow-style: none !important; scrollbar-gutter: none !important;
-    margin: 0 !important; padding: 0 !important; box-sizing: border-box !important; width: 100% !important; max-width: 100% !important; border: none !important;
-}
-body::-webkit-scrollbar, html::-webkit-scrollbar, #displaybox::-webkit-scrollbar, #sb-body::-webkit-scrollbar, .gemini-ui::-webkit-scrollbar, main::-webkit-scrollbar, #main-content::-webkit-scrollbar, #aicliagents-root::-webkit-scrollbar, .main-section::-webkit-scrollbar {
-    display: none !important; width: 0 !important; height: 0 !important;
-}
-div.title, .title, .title-row, .title-bar, .header-row { display: none !important; }
-#displaybox, #main-content { position: relative !important; left: 0 !important; right: 0 !important; }
-#aicliagents-root { width: 100% !important; display: flex; flex-direction: column; margin: 0 !important; padding: 0 !important; min-height: 400px; box-sizing: border-box !important; overflow: hidden !important; position: relative !important; }
-.gemini-ui { height: 100%; width: 100%; overflow: hidden !important; margin: 0 !important; padding: 0 !important; }
-</style>
+// Include UI Components
+$ui_path = '/usr/local/emhttp/plugins/unraid-aicliagents/src/includes/ui';
+require_once "$ui_path/TerminalStyles.php";
+require_once "$ui_path/CommonLogging.php";
+?>
 
 <div id="aicliagents-root"></div>
 
-<link rel="stylesheet" href="/plugins/unraid-aicliagents/assets/ui/index.css?v=<?= time() ?>">
-<script type="module" src="/plugins/unraid-aicliagents/assets/ui/index.js?v=<?= time() ?>"></script>
+<?php
+require_once "$ui_path/UploadOverlay.php";
+?>
 
-<script>
-(function() {
-    window.csrf_token = '<?=$csrf_token?>' || (typeof csrf_token !== 'undefined' ? csrf_token : '');
-    window.aicli_version = '<?=$version?>';
+<link rel="stylesheet" href="/plugins/unraid-aicliagents/assets/ui/index.css?v=<?= htmlspecialchars($version) ?>">
+<script type="module" src="/plugins/unraid-aicliagents/assets/ui/index.js?v=<?= htmlspecialchars($version) ?>"></script>
 
-    async function syncWorkspaces() {
-        try {
-            const resp = await fetch('/plugins/unraid-aicliagents/AICliAjax.php?action=get_workspaces&csrf_token=' + encodeURIComponent(window.csrf_token));
-            const data = await resp.json();
-            const localSessions = JSON.parse(localStorage.getItem('aicliagents_sessions') || '[]');
-            const localActiveId = localStorage.getItem('aicliagents_active_id');
-            const serverSessions = (data && data.sessions) ? data.sessions : [];
-
-            if (serverSessions.length === 0 && localSessions.length > 0) {
-                fetch('/plugins/unraid-aicliagents/AICliAjax.php?action=save_workspaces&csrf_token=' + encodeURIComponent(window.csrf_token), {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                    body: new URLSearchParams({
-                        csrf_token: window.csrf_token,
-                        workspaces: JSON.stringify({ sessions: localSessions, activeId: localActiveId })
-                    })
-                });
-            } else if (data && typeof data === 'object') {
-                localStorage.setItem('aicliagents_sessions', JSON.stringify(serverSessions));
-                if (data.activeId !== undefined) localStorage.setItem('aicliagents_active_id', data.activeId);
-            }
-        } catch (e) {
-            console.warn("[AICli] sync failed:", e);
-        }
-    }
-
-    const originalSetItem = localStorage.setItem;
-    localStorage.setItem = function(key, value) {
-        if (key === 'aicliagents_sessions' || key === 'aicliagents_active_id') {
-            const sessions = (key === 'aicliagents_sessions') ? JSON.parse(value) : JSON.parse(localStorage.getItem('aicliagents_sessions') || '[]');
-            const activeId = (key === 'aicliagents_active_id') ? value : localStorage.getItem('aicliagents_active_id');
-            clearTimeout(window._aicliSyncTimer);
-            window._aicliSyncTimer = setTimeout(function() {
-                fetch('/plugins/unraid-aicliagents/AICliAjax.php?action=save_workspaces&csrf_token=' + encodeURIComponent(window.csrf_token), {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                    body: new URLSearchParams({
-                        csrf_token: window.csrf_token,
-                        workspaces: JSON.stringify({ sessions: sessions, activeId: activeId })
-                    })
-                }).catch(function(e) { console.error(e); });
-            }, 500);
-        }
-        originalSetItem.apply(this, arguments);
-    };
-
-    function killScroll() {
-        const targets = 'html, body, #displaybox, #sb-body, #sb-container, #main-content, .main-section';
-        $(targets).css({ 'overflow': 'hidden', 'overflow-y': 'hidden', 'scrollbar-gutter': 'none', 'width': '100%', 'max-width': '100%', 'margin': '0', 'padding': '0' });
-        document.documentElement.style.setProperty('overflow', 'hidden', 'important');
-        document.body.style.setProperty('overflow', 'hidden', 'important');
-        $('#displaybox, #main-content').each(function() {
-            this.style.setProperty('padding', '0', 'important');
-            this.style.setProperty('margin', '0', 'important');
-            this.style.setProperty('width', '100%', 'important');
-        });
-    }
-
-    let resizeTimer;
-    function resizeRoot() {
-        if (resizeTimer) cancelAnimationFrame(resizeTimer);
-        resizeTimer = requestAnimationFrame(function() {
-            const el = document.getElementById('aicliagents-root');
-            if (!el) return;
-            const rect = el.getBoundingClientRect();
-            const footer = document.getElementById('footer');
-            const footerHeight = (footer && footer.offsetHeight > 10) ? footer.offsetHeight : 24;
-            const available = window.innerHeight - rect.top - footerHeight;
-            el.style.height = Math.max(400, Math.floor(available)) + 'px';
-            killScroll();
-            window.dispatchEvent(new Event('resize'));
-            // D-180: Broaden selector to ensure ALL terminals (including overlays) receive resize events
-            document.querySelectorAll('iframe').forEach(function(iframe) {
-                if (iframe.contentWindow) {
-                    try { iframe.contentWindow.dispatchEvent(new Event('resize')); } catch(e) {}
-                }
-            });
-        });
-    }
-
-    syncWorkspaces();
-    $(function() {
-        resizeRoot();
-        window.addEventListener('resize', resizeRoot);
-        [100, 500, 2000].forEach(function(ms) { setTimeout(resizeRoot, ms); });
-        killScroll();
-    });
-})();
-</script>
+<?php
+require_once "$ui_path/TerminalGlobalState.php";
+require_once "$ui_path/TerminalUploadScripts.php";
+require_once "$ui_path/TerminalScripts.php";
+?>
