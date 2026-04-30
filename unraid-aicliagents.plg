@@ -1,6 +1,6 @@
 <?xml version='1.0' standalone='yes'?>
 
-<PLUGIN name="unraid-aicliagents" author="John White" version="2026.04.30.01" launch="Settings/AICliAgentsManager" pluginURL="https://raw.githubusercontent.com/johnpwhite/unraid-plg-aicliagents/main/unraid-aicliagents.plg" min="7.2.0" icon="assets/icons/google-gemini.png">
+<PLUGIN name="unraid-aicliagents" author="John White" version="2026.04.30.01" launch="Settings/AICliAgentsManager" pluginURL="https://raw.githubusercontent.com/scs3jb/unraid-plg-aicliagents/main/unraid-aicliagents.plg" min="7.2.0" icon="assets/icons/google-gemini.png">
 
 <CHANGES>
 ## 2026.04.30.01
@@ -100,40 +100,40 @@
 
 <!-- MANIFEST: Download Modular Scripts (Installer) -->
 <FILE Name="/tmp/aicli-clean.sh">
-<URL>https://raw.githubusercontent.com/johnpwhite/unraid-plg-aicliagents/main/src/scripts/installer/cleanup.sh</URL>
+<URL>https://raw.githubusercontent.com/scs3jb/unraid-plg-aicliagents/main/src/scripts/installer/cleanup.sh</URL>
 </FILE>
 <FILE Name="/tmp/aicli-legacy.sh">
-<URL>https://raw.githubusercontent.com/johnpwhite/unraid-plg-aicliagents/main/src/scripts/installer/migrate-from-geminicli.sh</URL>
+<URL>https://raw.githubusercontent.com/scs3jb/unraid-plg-aicliagents/main/src/scripts/installer/migrate-from-geminicli.sh</URL>
 </FILE>
 <FILE Name="/tmp/aicli-runtime.sh">
-<URL>https://raw.githubusercontent.com/johnpwhite/unraid-plg-aicliagents/main/src/scripts/installer/runtime.sh</URL>
+<URL>https://raw.githubusercontent.com/scs3jb/unraid-plg-aicliagents/main/src/scripts/installer/runtime.sh</URL>
 </FILE>
 <FILE Name="/tmp/aicli-ui.sh">
-<URL>https://raw.githubusercontent.com/johnpwhite/unraid-plg-aicliagents/main/src/scripts/installer/ui-assets.sh</URL>
+<URL>https://raw.githubusercontent.com/scs3jb/unraid-plg-aicliagents/main/src/scripts/installer/ui-assets.sh</URL>
 </FILE>
 <FILE Name="/tmp/aicli-storage.sh">
-<URL>https://raw.githubusercontent.com/johnpwhite/unraid-plg-aicliagents/main/src/scripts/installer/storage.sh</URL>
+<URL>https://raw.githubusercontent.com/scs3jb/unraid-plg-aicliagents/main/src/scripts/installer/storage.sh</URL>
 </FILE>
 <FILE Name="/tmp/aicli-finalize.sh">
-<URL>https://raw.githubusercontent.com/johnpwhite/unraid-plg-aicliagents/main/src/scripts/installer/finalize.sh</URL>
+<URL>https://raw.githubusercontent.com/scs3jb/unraid-plg-aicliagents/main/src/scripts/installer/finalize.sh</URL>
 </FILE>
 <FILE Name="/tmp/aicli-repair.sh">
-<URL>https://raw.githubusercontent.com/johnpwhite/unraid-plg-aicliagents/main/src/scripts/user/repair-plugin.sh</URL>
+<URL>https://raw.githubusercontent.com/scs3jb/unraid-plg-aicliagents/main/src/scripts/user/repair-plugin.sh</URL>
 </FILE>
 <FILE Name="/tmp/aicli-stop.sh">
-<URL>https://raw.githubusercontent.com/johnpwhite/unraid-plg-aicliagents/main/src/scripts/user/stop-plugin.sh</URL>
+<URL>https://raw.githubusercontent.com/scs3jb/unraid-plg-aicliagents/main/src/scripts/user/stop-plugin.sh</URL>
 </FILE>
 <FILE Name="/tmp/aicli-stop-warning.page">
-<URL>https://raw.githubusercontent.com/johnpwhite/unraid-plg-aicliagents/main/src/ArrayStopWarning.page</URL>
+<URL>https://raw.githubusercontent.com/scs3jb/unraid-plg-aicliagents/main/src/ArrayStopWarning.page</URL>
 </FILE>
 <FILE Name="/tmp/aicli-src.tar.gz">
-<URL>https://raw.githubusercontent.com/johnpwhite/unraid-plg-aicliagents/main/src.tar.gz</URL>
+<URL>https://raw.githubusercontent.com/scs3jb/unraid-plg-aicliagents/main/src.tar.gz</URL>
 </FILE>
 <FILE Name="/tmp/aicli-engine.sh">
-<URL>https://raw.githubusercontent.com/johnpwhite/unraid-plg-aicliagents/main/src/scripts/installer/install-engine.sh</URL>
+<URL>https://raw.githubusercontent.com/scs3jb/unraid-plg-aicliagents/main/src/scripts/installer/install-engine.sh</URL>
 </FILE>
 <FILE Name="/tmp/aicli-uninstaller.sh">
-<URL>https://raw.githubusercontent.com/johnpwhite/unraid-plg-aicliagents/main/src/scripts/uninstaller/uninstall-engine.sh</URL>
+<URL>https://raw.githubusercontent.com/scs3jb/unraid-plg-aicliagents/main/src/scripts/uninstaller/uninstall-engine.sh</URL>
 </FILE>
 
 <!-- MAIN INSTALL ENGINE -->
@@ -143,7 +143,7 @@
 # AICliAgents Modular Installer Engine
 export NAME="unraid-aicliagents"
 export VERSION="2026.04.16.27"
-export GIT_URL="https://raw.githubusercontent.com/johnpwhite/unraid-plg-aicliagents/main"
+export GIT_URL="https://raw.githubusercontent.com/scs3jb/unraid-plg-aicliagents/main"
 export EMHTTP_DEST="/usr/local/emhttp/plugins/unraid-aicliagents"
 export CONFIG_DIR="/boot/config/plugins/unraid-aicliagents"
 
