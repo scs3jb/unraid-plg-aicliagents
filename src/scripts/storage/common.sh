@@ -32,22 +32,30 @@ guard_path() {
         return 1
     fi
 
-    # Must start with an allowed prefix (match both exact dir and children)
+    # Must start with an allowed prefix
     local allowed=0
     case "$path" in
         /tmp/unraid-aicliagents/zram_upper|/tmp/unraid-aicliagents/zram_upper/*) allowed=1 ;;
         /tmp/unraid-aicliagents|/tmp/unraid-aicliagents/*) allowed=1 ;;
         /usr/local/emhttp/plugins/unraid-aicliagents|/usr/local/emhttp/plugins/unraid-aicliagents/*) allowed=1 ;;
         /boot/config/plugins/unraid-aicliagents|/boot/config/plugins/unraid-aicliagents/*) allowed=1 ;;
-        # Any /mnt/<name>/<subpath>: covers user shares, array disks, custom pools,
-        # and Unassigned Devices (/mnt/disks/*, /mnt/remotes/*). Requires a non-empty
-        # pool/disk name and a non-empty subpath; bare /mnt and /mnt/<name> are not
-        # accepted as destinations to avoid writing at a mount root.
-        /mnt/?*/?*) allowed=1 ;;
+        /mnt/*)
+            # For /mnt paths, we require at least one level of nesting to avoid writing
+            # directly to a mount root (e.g., /mnt/user, /mnt/cache).
+            # We check if there is at least one slash after /mnt/<name>/
+            local subpath="${path#/mnt/}"
+            if [[ "$subpath" == */* ]]; then
+                allowed=1
+            fi
+            ;;
     esac
 
     if [ "$allowed" -ne 1 ]; then
-        echo "[$(get_ts)] [ERR!] [guard_path] $label outside allowed prefixes: $path" >> "$DEBUG_LOG"
+        if [[ "$path" == /mnt/* ]]; then
+             echo "[$(get_ts)] [ERR!] [guard_path] $label is a mount root or top-level dir: $path" >> "$DEBUG_LOG"
+        else
+             echo "[$(get_ts)] [ERR!] [guard_path] $label outside allowed prefixes: '$path'" >> "$DEBUG_LOG"
+        fi
         return 1
     fi
 
