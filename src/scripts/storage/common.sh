@@ -40,19 +40,19 @@ guard_path() {
         /usr/local/emhttp/plugins/unraid-aicliagents|/usr/local/emhttp/plugins/unraid-aicliagents/*) allowed=1 ;;
         /boot/config/plugins/unraid-aicliagents|/boot/config/plugins/unraid-aicliagents/*) allowed=1 ;;
         /mnt/*)
-            # For /mnt paths, we require at least one level of nesting to avoid writing
-            # directly to a mount root (e.g., /mnt/user, /mnt/cache).
-            # We check if there is at least one slash after /mnt/<name>/
-            local subpath="${path#/mnt/}"
-            if [[ "$subpath" == */* ]]; then
+            # D-406: Robust Unraid Path Validation
+            # We allow any path under /mnt/ that has at least two components after /mnt/
+            # e.g., /mnt/user/appdata is allowed, /mnt/user is NOT (mount root).
+            # This covers array disks, user shares, custom pools, and Unassigned Devices.
+            if [[ "$path" =~ ^/mnt/[^/]+/.+ ]]; then
                 allowed=1
             fi
             ;;
     esac
 
     if [ "$allowed" -ne 1 ]; then
-        if [[ "$path" == /mnt/* ]]; then
-             echo "[$(get_ts)] [ERR!] [guard_path] $label is a mount root or top-level dir: $path" >> "$DEBUG_LOG"
+        if [[ "$path" =~ ^/mnt/[^/]+/?$ ]]; then
+             echo "[$(get_ts)] [ERR!] [guard_path] $label is a mount root (e.g. /mnt/user): $path" >> "$DEBUG_LOG"
         else
              echo "[$(get_ts)] [ERR!] [guard_path] $label outside allowed prefixes: '$path'" >> "$DEBUG_LOG"
         fi
