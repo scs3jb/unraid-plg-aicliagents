@@ -1,8 +1,11 @@
 <?xml version='1.0' standalone='yes'?>
 
-<PLUGIN name="unraid-aicliagents" author="John White" version="2026.04.16.27" launch="Settings/AICliAgentsManager" pluginURL="https://raw.githubusercontent.com/johnpwhite/unraid-plg-aicliagents/main/unraid-aicliagents.plg" min="7.2.0" icon="assets/icons/google-gemini.png">
+<PLUGIN name="unraid-aicliagents" author="John White" version="2026.04.30.01" launch="Settings/AICliAgentsManager" pluginURL="https://raw.githubusercontent.com/johnpwhite/unraid-plg-aicliagents/main/unraid-aicliagents.plg" min="7.2.0" icon="assets/icons/google-gemini.png">
 
 <CHANGES>
+## 2026.04.30.01
+- Fix: Persistence path validation rejected custom Unraid pools and Unassigned Devices. The guard_path helper hard-coded only /mnt/user, /mnt/cache, and /mnt/disk[0-9]* as allowed prefixes, so configuring agent or home storage on a user-defined pool (e.g. /mnt/scratch_old/...) or a UD mount (/mnt/disks/*, /mnt/remotes/*) failed with "PERSIST_PATH outside allowed prefixes". Replaced the narrow whitelist with a generic /mnt/&lt;name&gt;/&lt;subpath&gt; match that covers user shares, array disks, custom pools, and UD paths while still rejecting bare mount roots.
+
 ## 2026.04.16.27
 - Fix: Migration script wrote home sqsh to agent_storage_path instead of home_storage_path. When paths differ (common for users with persistence_base configured), the home sqsh was placed where only agents are expected, causing mount failure. Now reads home_storage_path and persistence_base from config separately. Also searches all relevant paths for legacy IMG files and raw folders.
 

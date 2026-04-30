@@ -39,9 +39,11 @@ guard_path() {
         /tmp/unraid-aicliagents|/tmp/unraid-aicliagents/*) allowed=1 ;;
         /usr/local/emhttp/plugins/unraid-aicliagents|/usr/local/emhttp/plugins/unraid-aicliagents/*) allowed=1 ;;
         /boot/config/plugins/unraid-aicliagents|/boot/config/plugins/unraid-aicliagents/*) allowed=1 ;;
-        /mnt/user/*) allowed=1 ;;
-        /mnt/cache/*) allowed=1 ;;
-        /mnt/disk[0-9]*) allowed=1 ;;
+        # Any /mnt/<name>/<subpath>: covers user shares, array disks, custom pools,
+        # and Unassigned Devices (/mnt/disks/*, /mnt/remotes/*). Requires a non-empty
+        # pool/disk name and a non-empty subpath; bare /mnt and /mnt/<name> are not
+        # accepted as destinations to avoid writing at a mount root.
+        /mnt/?*/?*) allowed=1 ;;
     esac
 
     if [ "$allowed" -ne 1 ]; then
